@@ -11,6 +11,7 @@
 # satisfy_depends                                          #
 #                                                          #
 # 20020710                                                 #
+# Updated 2025 with lunar-depquery integration             #
 #                                                          #
 ############################################################
 #                                                          #
@@ -18,7 +19,16 @@
 #                                                          #
 # Copyright Auke Kok 2004 under GPLv2                      #
 #                                                          #
+# Copyright Stefan Wold 2025 under GPLv2                   #
+#                                                          #
 ############################################################
+
+# Check if lunar-depquery is available for fast operations
+if command -v lunar-depquery >/dev/null 2>&1; then
+  HAVE_DEPQUERY=1
+else
+  HAVE_DEPQUERY=0
+fi
 
 
 # function : find_depends
@@ -29,6 +39,13 @@ function find_depends() {
   local TMP_FDEPS
   debug_msg "find_depends ($@)"
 
+  # Fast path: use lunar-depquery if available
+  if [ "$HAVE_DEPQUERY" = 1 ]; then
+    lunar-depquery find-deps "$(expand_alias $1)" 2>/dev/null
+    return $?
+  fi
+
+  # Fallback: original bash implementation
   find_depends_intern() {
     local DEP DEPS DEPFILE SECTION
     SECTION=$(find_section $1)
@@ -85,6 +102,21 @@ sort_by_dependency() {
   local TMP_LIST TMP_ALL TMP_TSRT A B
   debug_msg "sort_by_dependency ($@)"
 
+  # Fast path: use lunar-depquery if available
+  if [ "$HAVE_DEPQUERY" = 1 ]; then
+    if lunar-depquery sort-deps "$@" 2>/dev/null; then
+      return 0
+    elif [[ "${DETECT_DEPENDENCY_LOOPS:-off}" == on ]]; then
+      error_message "${PROBLEM_COLOR}Dependency loop detected!${DEFAULT_COLOR}"
+      error_message "${PROBLEM_COLOR}You should lin -r one of the modules with optional dependencies.${DEFAULT_COLOR}"
+      if [ -t 1 ] && query "Stop now and try again?" y; then
+        exit 1
+      fi
+    fi
+    # If depquery failed but we're continuing, fall through to bash version
+  fi
+
+  # Fallback: original bash implementation
   TMP_LIST=$(temp_create "deptree.in")
   TMP_ALL=$(temp_create "deptree.all")
 
@@ -141,6 +173,14 @@ sort_by_dependency() {
 is_depends()  {
   debug_msg "is_depends ($@)"
   # Is $1 a previously selected dependency of any module.
+
+  # Fast path: use lunar-depquery if available
+  if [ "$HAVE_DEPQUERY" = 1 ]; then
+    lunar-depquery is-depends "$1" 2>/dev/null
+    return $?
+  fi
+
+  # Fallback
   return $(grep -q ":$1:on:" "$DEPENDS_STATUS")
 }
 
@@ -150,6 +190,14 @@ in_depends()  {
   debug_msg "in_depends ($@)"
 
   DEP=$(expand_alias $2)
+
+  # Fast path: use lunar-depquery if available
+  if [ "$HAVE_DEPQUERY" = 1 ]; then
+    lunar-depquery in-depends "$1" "$DEP" 2>/dev/null
+    return $?
+  fi
+
+  # Fallback
   # Was $2 presented as a dependency for module $1
   return $(grep -q "^$1:$DEP:on:" "$DEPENDS_STATUS")
 }
@@ -228,14 +276,18 @@ run_depends() {
 
   optional_depends()  {
   debug_msg "  optional_depends ($@)"
-    local DEP DEFAULT DEPMOD_AVAIL
+    local DEP DEFAULT DEPMOD_AVAIL REQUIRES REQUIRED_DEP USER_ACCEPTED
     # parameters:  $1 = module name
     #              $2 = configure parameter if module wanted
     #              $3 = configure parameter if module declined
     #              $4 = description of why to use this module
     #              $5 = optional default choice (recommended)
+    #              $6 = space-separated list of required co-dependencies (NEW)
 
     DEP=$(expand_alias $1)
+    REQUIRES="${6:-}"  # New parameter for co-dependencies
+    USER_ACCEPTED=0    # Track if user accepted this dependency
+
     if in_depends $MODULE $DEP ; then
       if ! module_installed $DEP ; then
         # don't check depends if there are already checked
@@ -263,6 +315,7 @@ run_depends() {
         if module_enforced $DEP ; then
           verbose_msg "Enforcing optional dependency \"$DEP\""
           add_depends  "$MODULE"  "$DEP"  "on"   "optional"  "$2"  "$3"
+          USER_ACCEPTED=1
           # don't check depends if there are already checked
           if grep -q "^$DEP\$" "$TEMP_PREPAREDDEPS" 2>/dev/null ; then
             return 0
@@ -272,6 +325,7 @@ run_depends() {
         elif module_installed $DEP && [ -z "$2" -a -z "$3" ] ; then
           verbose_msg "Auto-adding optional dependency \"$DEP\""
           add_depends  "$MODULE"  "$DEP"  "on"   "optional"  "$2"  "$3"
+          USER_ACCEPTED=1
           # don't check depends if there are already checked
           if grep -q "^$DEP\$" "$TEMP_PREPAREDDEPS" 2>/dev/null ; then
             return 0
@@ -281,6 +335,7 @@ run_depends() {
         elif query  "$DEPMOD_AVAIL
           ${QUERY_COLOR}Purpose: ${DEFAULT_COLOR}${MESSAGE_COLOR}$4 ${QUERY_COLOR}?" $DEFAULT ; then
           add_depends  "$MODULE"  "$DEP"  "on"   "optional"  "$2"  "$3"
+          USER_ACCEPTED=1
           # don't check depends if there are already checked
           if grep -q "^$DEP\$" "$TEMP_PREPAREDDEPS" 2>/dev/null ; then
             return 0
@@ -291,6 +346,34 @@ run_depends() {
           add_depends  "$MODULE"  "$DEP"  "off"  "optional"  "$2"  "$3"
         fi
       fi
+    fi
+
+    # NEW: Handle co-dependencies if user accepted this dependency
+    if [ "$USER_ACCEPTED" = 1 ] && [ -n "$REQUIRES" ]; then
+      for REQUIRED_DEP in $REQUIRES; do
+        REQUIRED_DEP=$(expand_alias "$REQUIRED_DEP")
+        verbose_msg "Auto-enabling required co-dependency: $REQUIRED_DEP (required by $DEP)"
+
+        if ! module_installed $REQUIRED_DEP ; then
+          if module_exiled $REQUIRED_DEP ; then
+            message "${MODULE_COLOR}${MODULE}:${PROBLEM_COLOR} ! Warning: co-dependency ${MODULE_COLOR}$REQUIRED_DEP${DEFAULT_COLOR}${PROBLEM_COLOR} is exiled${DEFAULT_COLOR}"
+          else
+            # Add as enabled dependency without prompting
+            add_depends "$MODULE" "$REQUIRED_DEP" "on" "optional" "" ""
+            if ! grep -q "^$REQUIRED_DEP\$" "$TEMP_PREPAREDDEPS" 2>/dev/null ; then
+              message "${MODULE_COLOR}${MODULE}:${DEFAULT_COLOR}" \
+                      "${MESSAGE_COLOR}Adding co-dependency${DEFAULT_COLOR}" \
+                      "${MODULE_COLOR}$REQUIRED_DEP${DEFAULT_COLOR}"
+              lin --deps $REQUIRED_DEP
+              echo "$REQUIRED_DEP" >> $TEMP_PREPAREDDEPS
+            fi
+          fi
+        else
+          # Already installed, just mark as enabled
+          add_depends "$MODULE" "$REQUIRED_DEP" "on" "optional" "" ""
+          verbose_msg "Co-dependency $REQUIRED_DEP already installed"
+        fi
+      done
     fi
   }
 

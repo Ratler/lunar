@@ -12,9 +12,34 @@
 
 # optional depends that use configure switches:
 # optional_depends  "moduleC" \
-#                       "--with-configure-option" \ 
-#                       "--without-configure-option" \ 
+#                       "--with-configure-option" \
+#                       "--without-configure-option" \
 #                       "for blabla support"
+
+# NEW: optional depends with co-dependencies (6th parameter)
+# If user says yes to moduleE, moduleF will be automatically enabled
+# optional_depends  "moduleE" \
+#                       "--enable-feature" \
+#                       "--disable-feature" \
+#                       "for advanced feature support" \
+#                       "n" \
+#                       "moduleF"
+
+# Example: Wayland with protocols (real-world use case)
+# optional_depends  "wayland" \
+#                       "--enable-wayland" \
+#                       "--disable-wayland" \
+#                       "for Wayland display server support" \
+#                       "n" \
+#                       "wayland-protocols"
+
+# Multiple co-dependencies (space-separated)
+# optional_depends  "qt6" \
+#                       "--enable-qt6" \
+#                       "--disable-qt6" \
+#                       "for Qt6 GUI framework" \
+#                       "n" \
+#                       "qt6-base qt6-tools"
 
 # multiple depends:
 #	depends moduleA &&

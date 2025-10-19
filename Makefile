@@ -14,7 +14,23 @@ blacklist = $(shell ls -1 blacklist/*)
 compilers = $(shell ls -1 compilers/*)
 mans = $(shell ls -1 man/*)
 
-all:
+DEPQUERY_BIN = tools/lunar-depquery/lunar-depquery
+
+all: lunar-depquery
+
+# Build lunar-depquery Go utility
+.PHONY: lunar-depquery
+lunar-depquery:
+	@if command -v go >/dev/null 2>&1; then \
+		echo "Building lunar-depquery..."; \
+		cd tools/lunar-depquery && go build -o lunar-depquery -ldflags="-s -w"; \
+	else \
+		echo "Warning: Go compiler not found, skipping lunar-depquery build"; \
+	fi
+
+.PHONY: clean-depquery
+clean-depquery:
+	rm -f $(DEPQUERY_BIN)
 
 .PHONY:
 install: .PHONY
@@ -78,6 +94,14 @@ install: .PHONY
 	# easy way out for the docs:
 	install -d $(DESTDIR)/usr/share/doc/lunar
 	cp -av doc $(DESTDIR)/usr/share/doc/lunar/
+	# Install lunar-depquery if it was built
+	@if [ -f $(DEPQUERY_BIN) ]; then \
+		echo "Installing lunar-depquery..."; \
+		install -d $(DESTDIR)/usr/bin; \
+		install -m0755 $(DEPQUERY_BIN) $(DESTDIR)/usr/bin/; \
+	else \
+		echo "lunar-depquery not built, skipping installation"; \
+	fi
 
 tag:
 	git tag v$(VERSION)

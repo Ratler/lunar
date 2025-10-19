@@ -17,13 +17,21 @@
 # 20030113 merging more functions in here - sofar          #
 # 20030417 adding hold routines - sofar                    #
 # 20180726 added module replacement functions - Ratler     #
+# 20250119 added lunar-depquery integration - Ratler       #
 ############################################################
 #                                                          #
 # Copyrighted Kagan Kongar 2002 under GPLv2                #
 # Portions Copyrighted Chuck Mead 2002 under GPLv2         #
 # Portions Copyrighted Auke Kok 2003 under GPLv2           #
-# Portions Copyrighted Stefan Wold 2018 under GPLv2        #
+# Portions Copyrighted Stefan Wold 2018-2025 under GPLv2   #
 ############################################################
+
+# Check if lunar-depquery is available for fast operations
+if command -v lunar-depquery >/dev/null 2>&1; then
+  HAVE_DEPQUERY=1
+else
+  HAVE_DEPQUERY=0
+fi
 
 
 # function : list_sections
@@ -320,6 +328,13 @@ module_installed()
 {
   debug_msg "module_installed ($@)"
 
+  # Fast path: use lunar-depquery if available
+  if [ "$HAVE_DEPQUERY" = 1 ]; then
+    lunar-depquery is-installed "$1" 2>/dev/null
+    return $?
+  fi
+
+  # Fallback
   has_module_state $1 "\\(installed\\|held\\)"
 }
 
@@ -330,6 +345,13 @@ module_installed()
 module_held() {
   debug_msg "module_held ($@)"
 
+  # Fast path: use lunar-depquery if available
+  if [ "$HAVE_DEPQUERY" = 1 ]; then
+    lunar-depquery is-held "$1" 2>/dev/null
+    return $?
+  fi
+
+  # Fallback
   has_module_state $1 "held"
 }
 
@@ -401,16 +423,30 @@ module_license_accepted() {
 module_exiled() {
   debug_msg "module_exiled ($@)"
 
+  # Fast path: use lunar-depquery if available
+  if [ "$HAVE_DEPQUERY" = 1 ]; then
+    lunar-depquery is-exiled "$1" 2>/dev/null
+    return $?
+  fi
+
+  # Fallback
   has_module_state $1 "exiled"
 }
 
 
-# function : module_exiled
-# usage    : module_exiled $MODULE
-# purpose  : check if $MODULE is exiled
+# function : module_enforced
+# usage    : module_enforced $MODULE
+# purpose  : check if $MODULE is enforced
 module_enforced() {
   debug_msg "module_enforced ($@)"
 
+  # Fast path: use lunar-depquery if available
+  if [ "$HAVE_DEPQUERY" = 1 ]; then
+    lunar-depquery is-enforced "$1" 2>/dev/null
+    return $?
+  fi
+
+  # Fallback
   has_module_state $1 "enforced"
 }
 
