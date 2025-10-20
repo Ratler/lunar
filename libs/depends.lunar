@@ -104,16 +104,24 @@ sort_by_dependency() {
 
   # Fast path: use lunar-depquery if available
   if [ "$HAVE_DEPQUERY" = 1 ]; then
-    if lunar-depquery sort-deps "$@" 2>/dev/null; then
-      return 0
-    elif [[ "${DETECT_DEPENDENCY_LOOPS:-off}" == on ]]; then
+    local DEPQUERY_OUTPUT DEPQUERY_RESULT
+    # lunar-depquery outputs partial result to stdout even on cycle (matching tsort behavior)
+    # Suppress stderr to avoid "Error sorting dependencies" message
+    DEPQUERY_OUTPUT=$(lunar-depquery sort-deps "$@" 2>/dev/null)
+    DEPQUERY_RESULT=$?
+
+    # Check if there was a cycle and DETECT_DEPENDENCY_LOOPS is on
+    if [ $DEPQUERY_RESULT -ne 0 ] && [[ "${DETECT_DEPENDENCY_LOOPS:-off}" == on ]]; then
       error_message "${PROBLEM_COLOR}Dependency loop detected!${DEFAULT_COLOR}"
       error_message "${PROBLEM_COLOR}You should lin -r one of the modules with optional dependencies.${DEFAULT_COLOR}"
       if [ -t 1 ] && query "Stop now and try again?" y; then
         exit 1
       fi
     fi
-    # If depquery failed but we're continuing, fall through to bash version
+
+    # Output the result (partial or complete) and return
+    echo "$DEPQUERY_OUTPUT"
+    return 0
   fi
 
   # Fallback: original bash implementation

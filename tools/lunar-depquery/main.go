@@ -155,12 +155,14 @@ func main() {
 			os.Exit(2)
 		}
 		sorted, err := r.SortByDependency(os.Args[2:])
+		// Always output the partial result (matches tsort behavior)
+		for _, module := range sorted {
+			fmt.Println(module)
+		}
+		// Exit with error code if there was a cycle, but after outputting partial result
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error sorting dependencies: %v\n", err)
 			os.Exit(1)
-		}
-		for _, module := range sorted {
-			fmt.Println(module)
 		}
 		os.Exit(0)
 
