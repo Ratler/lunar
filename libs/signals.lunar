@@ -121,17 +121,20 @@ _lunar_cleanup() {
   if [ -n "$linING" ] && [ -f "$linING" ]; then
     rm -f "$linING"
   fi
-
-  exit 1
 }
 
 
 # function : lunar_setup_signals
 # usage    : lunar_setup_signals
 # purpose  : install signal traps for INT and TERM that invoke the
-#            cleanup handler, and an EXIT trap for abnormal exits
+#            cleanup handler, then re-raise the signal so the process
+#            dies from signal death (not normal exit). This is critical
+#            for bash's WCE mechanism: parent shells only deliver a
+#            pending signal to their own trap handler when the child
+#            dies from the actual signal, not from exit(N).
 lunar_setup_signals() {
   debug_msg "lunar_setup_signals ()"
-  trap '_lunar_cleanup' INT TERM
+  trap '_lunar_cleanup; trap - INT;  kill -INT  $BASHPID' INT
+  trap '_lunar_cleanup; trap - TERM; kill -TERM $BASHPID' TERM
   trap '_exit_status=$?; [ "$_LUNAR_CLEANUP_DONE" = "0" ] && [ "$_exit_status" != "0" ] && _lunar_cleanup' EXIT
 }

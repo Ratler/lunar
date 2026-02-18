@@ -247,11 +247,20 @@ lin_module()  {
   # PIDs registered via the cleanup registry). When Ctrl+C arrives, SIGINT
   # is sent to the entire process group — both this subshell and the parent
   # receive it and run their respective traps.
+  #
+  # We re-raise the original signal instead of using exit so that bash's
+  # WCE mechanism sees signal death and delivers the pending signal to the
+  # parent's trap handler.
   trap '
     [ -n "$linING" ] && [ -f "$linING" ] && rm -f "$linING"
     [ -n "$INSTALLWATCHFILE" ] && [ -f "$INSTALLWATCHFILE" ] && temp_destroy "$INSTALLWATCHFILE"
-    exit 1
-  ' INT TERM
+    trap - INT; kill -INT $BASHPID
+  ' INT
+  trap '
+    [ -n "$linING" ] && [ -f "$linING" ] && rm -f "$linING"
+    [ -n "$INSTALLWATCHFILE" ] && [ -f "$INSTALLWATCHFILE" ] && temp_destroy "$INSTALLWATCHFILE"
+    trap - TERM; kill -TERM $BASHPID
+  ' TERM
 
   debug_msg "lin_module ($@)"
   xterm_msg "compiling $1"
