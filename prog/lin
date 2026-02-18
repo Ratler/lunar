@@ -142,6 +142,9 @@ main() {
           wait
         done
       ) &
+      # register download manager PID for cleanup on signal
+      DOWNLOAD_MGR_PID=$!
+      cleanup_register_pid $DOWNLOAD_MGR_PID
 
       # pass 3 : compile/install
       # no strange stuff should happen here anymore
@@ -178,6 +181,13 @@ main() {
         fi
       done
     fi
+
+    # wait for download manager to finish or kill it
+    if [ -n "$DOWNLOAD_MGR_PID" ] && kill -0 $DOWNLOAD_MGR_PID 2>/dev/null; then
+      kill -TERM $DOWNLOAD_MGR_PID 2>/dev/null
+      wait $DOWNLOAD_MGR_PID 2>/dev/null
+    fi
+    cleanup_unregister_pid $DOWNLOAD_MGR_PID
 
     # cleanups that we need to do
     temp_destroy $TEMP_DOWNLOAD_PIDS
