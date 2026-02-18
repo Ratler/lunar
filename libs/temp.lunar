@@ -22,6 +22,10 @@ temp_create() {
   debug_msg "temp_create ($@)"
   TMPFILE="$@"
   if TMPFILE=$(mktemp -p "$TMPDIR" -t lunar.`basename $0`.$TMPFILE.$$.XXXXXXXXXX ) ; then
+    # register temp file for automatic cleanup on signal
+    if type -t cleanup_register &>/dev/null; then
+      cleanup_register "$TMPFILE"
+    fi
     echo $TMPFILE
   else
     message "${PROBLEM_COLOR}ERROR:${DEFAULT_COLOR}" \
