@@ -100,10 +100,13 @@ main() {
   if [ -z "$SINGLE_MODULE" ]; then
 
     if [ -z "$TEMP_DOWNLOAD_PIDS" ]; then
-      export TEMP_DOWNLOAD_PIDS=$(temp_create "download-pids")
-      export TEMP_PREPAREDDEPS=$(temp_create "prepared-depends")
+      temp_create TEMP_DOWNLOAD_PIDS "download-pids"
+      export TEMP_DOWNLOAD_PIDS
+      temp_create TEMP_PREPAREDDEPS "prepared-depends"
+      export TEMP_PREPAREDDEPS
     fi
-    export TEMP_CONFIGOPTS=$(temp_create "configopts")
+    temp_create TEMP_CONFIGOPTS "configopts"
+    export TEMP_CONFIGOPTS
 
     # pass 1 : run full dependency checking
     # This pass does configuration and dependency identification.
@@ -128,7 +131,7 @@ main() {
 
       verbose_msg "download queue: $LIST $MODULES"
       for M in $LIST $MODULES; do
-        THIS_TEMP=$(temp_create "$M.download.log")
+        temp_create THIS_TEMP "$M.download.log"
         rm $THIS_TEMP
         SAFE_M=$(echo $M | md5sum | awk '{print $1}')
         eval TEMP_DOWNLOAD_LOG_$SAFE_M=$THIS_TEMP
@@ -202,9 +205,12 @@ main() {
     unset RECONFIGURE
 
     if [ -z "$TEMP_DOWNLOAD_PIDS" ]; then
-      export TEMP_DOWNLOAD_PIDS=$(temp_create "download-pids")
-      export TEMP_PREPAREDDEPS=$(temp_create "prepared-depends")
-      export TEMP_CONFIGOPTS=$(temp_create "configopts")
+      temp_create TEMP_DOWNLOAD_PIDS "download-pids"
+      export TEMP_DOWNLOAD_PIDS
+      temp_create TEMP_PREPAREDDEPS "prepared-depends"
+      export TEMP_PREPAREDDEPS
+      temp_create TEMP_CONFIGOPTS "configopts"
+      export TEMP_CONFIGOPTS
       CLEAN_TEMP=1
     fi
 

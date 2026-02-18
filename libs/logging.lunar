@@ -12,8 +12,10 @@
 
 start_logging () {
   debug_msg "start_logging  ($@)"
-  export C_LOG=$(temp_create "${MODULE}.compile-log")
-  export C_FIFO=$(temp_create "${MODULE}.compile-fifo")
+  temp_create C_LOG "${MODULE}.compile-log"
+  export C_LOG
+  temp_create C_FIFO "${MODULE}.compile-fifo"
+  export C_FIFO
 
   # just remaking this as FIFO
   rm -f $C_FIFO

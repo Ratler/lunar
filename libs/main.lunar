@@ -26,8 +26,10 @@ renew() {
   replace_modules
   purge_modules
 
-  export TMP_LIN_SUCCESS=$(temp_create "successful")
-  export TMP_LIN_FAIL=$(temp_create "failed")
+  temp_create TMP_LIN_SUCCESS "successful"
+  export TMP_LIN_SUCCESS
+  temp_create TMP_LIN_FAIL "failed"
+  export TMP_LIN_FAIL
 
   update_modules
 
@@ -100,7 +102,7 @@ rebuild()  {
   message "${MESSAGE_COLOR}Sorting modules by dependency${DEFAULT_COLOR}"
   QUEUE=$(sort_by_dependency $LIST)
 
-  TMP_QUEUE=$(temp_create "rebuild-queue")
+  temp_create TMP_QUEUE "rebuild-queue"
   for MODULE in $QUEUE ; do
     echo $MODULE >> $TMP_QUEUE
   done
@@ -114,8 +116,10 @@ rebuild()  {
   temp_destroy $TMP_QUEUE
 
   if [ -n "$QUEUE" ] ; then
-    export TMP_LIN_SUCCESS=$(temp_create "successful")
-    export TMP_LIN_FAIL=$(temp_create "failed")
+    temp_create TMP_LIN_SUCCESS "successful"
+    export TMP_LIN_SUCCESS
+    temp_create TMP_LIN_FAIL "failed"
+    export TMP_LIN_FAIL
 
     message "${MESSAGE_COLOR}Starting rebuild of modules${DEFAULT_COLOR}"
     lin -c $QUEUE
@@ -135,9 +139,9 @@ expand_cache_safe() {(
   # untar the file so we can compare first
   tar -pkxf $1 -C $SOURCE_DIRECTORY 1>/dev/null 2>&1
   # make a md5sum list of files
-  TMP_TARGETS=$(temp_create "resurrect.targets.$MODULE")
+  temp_create TMP_TARGETS "resurrect.targets.$MODULE"
   tar tf $1 > $TMP_TARGETS
-  TMP_TARGETS_OK=$(temp_create "resurrect.targets_OK.$MODULE")
+  temp_create TMP_TARGETS_OK "resurrect.targets_OK.$MODULE"
   # do directories: we don`t care here
   # the sed trick is advanced: a non-greedy pattern that returns all
   # directory names listed in the input
@@ -284,7 +288,8 @@ lin_module()  {
   fi
 
   # set the installwatchfile
-  export INSTALLWATCHFILE=$(temp_create "$MODULE.installwatch")
+  temp_create INSTALLWATCHFILE "$MODULE.installwatch"
+  export INSTALLWATCHFILE
 
   # TODO: clean up DESTDIR_BUILD feature toggle
   if [[ "${DESTDIR_BUILD:-off}" == "on" ]]; then
