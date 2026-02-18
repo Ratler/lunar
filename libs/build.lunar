@@ -539,6 +539,9 @@ run_build()  {
   (
     # fix errors, don't avoid them. This makes all errors fatal
     shopt -s execfail
+    # kill all processes in this process group on interrupt so make/ninja
+    # children are cleaned up (exit 130 = 128 + SIGINT)
+    trap 'kill 0 2>/dev/null; exit 130' INT TERM
     if has_module_file $MODULE BUILD ; then
       run_module_file $MODULE BUILD
     else
