@@ -256,16 +256,20 @@ lin_module()  {
   # WCE mechanism sees signal death and delivers the pending signal to the
   # parent's trap handler.
   trap '
-    _sd "TRAP INT fired in lin_module subshell (linING=$linING, INSTALLWATCHFILE=$INSTALLWATCHFILE)"
+    _sd "TRAP INT fired in lin_module subshell"
     [ -n "$linING" ] && [ -f "$linING" ] && rm -f "$linING"
-    [ -n "$INSTALLWATCHFILE" ] && [ -f "$INSTALLWATCHFILE" ] && temp_destroy "$INSTALLWATCHFILE"
+    [ -n "$INSTALLWATCHFILE" ] && [ -f "$INSTALLWATCHFILE" ] && rm -f "$INSTALLWATCHFILE"
+    [ -n "$C_LOG" ] && [ -f "$C_LOG" ] && rm -f "$C_LOG"
+    [ -n "$C_FIFO" ] && rm -f "$C_FIFO"
     _sd "RE-RAISE INT from lin_module subshell"
     trap - INT; kill -INT $BASHPID
   ' INT
   trap '
-    _sd "TRAP TERM fired in lin_module subshell (linING=$linING, INSTALLWATCHFILE=$INSTALLWATCHFILE)"
+    _sd "TRAP TERM fired in lin_module subshell"
     [ -n "$linING" ] && [ -f "$linING" ] && rm -f "$linING"
-    [ -n "$INSTALLWATCHFILE" ] && [ -f "$INSTALLWATCHFILE" ] && temp_destroy "$INSTALLWATCHFILE"
+    [ -n "$INSTALLWATCHFILE" ] && [ -f "$INSTALLWATCHFILE" ] && rm -f "$INSTALLWATCHFILE"
+    [ -n "$C_LOG" ] && [ -f "$C_LOG" ] && rm -f "$C_LOG"
+    [ -n "$C_FIFO" ] && rm -f "$C_FIFO"
     _sd "RE-RAISE TERM from lin_module subshell"
     trap - TERM; kill -TERM $BASHPID
   ' TERM
