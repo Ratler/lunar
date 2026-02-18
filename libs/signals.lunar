@@ -21,6 +21,10 @@
 # INT/TERM, the cleanup handler releases all registered    #
 # resources and kills tracked child processes.             #
 #                                                          #
+# The registry uses a plain file (not bash arrays) so      #
+# that registrations from $() command substitution         #
+# subshells are visible to the parent's cleanup handler.   #
+#                                                          #
 # functions: lunar_setup_signals, cleanup_register,        #
 #   cleanup_register_lock, cleanup_register_pid,           #
 #   cleanup_unregister_pid, _lunar_cleanup                 #
@@ -36,10 +40,9 @@ _sd() {
   echo "$(date '+%H:%M:%S.%N') [$(basename $0):$$:$BASHPID] $*" >> "$_LUNAR_SIGNAL_LOG"
 }
 
-# Cleanup registry arrays
-_LUNAR_CLEANUP_FILES=()
-_LUNAR_CLEANUP_LOCKS=()
-_LUNAR_CLEANUP_PIDS=()
+# File-based cleanup registry — shared across all subshells via $$
+# Each line is: TYPE PATH  (where TYPE is F=file, L=lock, P=pid)
+_LUNAR_CLEANUP_REGISTRY=""
 
 # Re-entrancy guard
 _LUNAR_CLEANUP_DONE=0
@@ -51,7 +54,7 @@ _LUNAR_CLEANUP_DONE=0
 cleanup_register() {
   debug_msg "cleanup_register ($@)"
   _sd "REG file: $1"
-  _LUNAR_CLEANUP_FILES+=("$1")
+  [ -n "$_LUNAR_CLEANUP_REGISTRY" ] && echo "F $1" >> "$_LUNAR_CLEANUP_REGISTRY"
 }
 
 
@@ -61,7 +64,7 @@ cleanup_register() {
 cleanup_register_lock() {
   debug_msg "cleanup_register_lock ($@)"
   _sd "REG lock: $1"
-  _LUNAR_CLEANUP_LOCKS+=("$1")
+  [ -n "$_LUNAR_CLEANUP_REGISTRY" ] && echo "L $1" >> "$_LUNAR_CLEANUP_REGISTRY"
 }
 
 
@@ -71,23 +74,17 @@ cleanup_register_lock() {
 cleanup_register_pid() {
   debug_msg "cleanup_register_pid ($@)"
   _sd "REG pid: $1"
-  _LUNAR_CLEANUP_PIDS+=("$1")
+  [ -n "$_LUNAR_CLEANUP_REGISTRY" ] && echo "P $1" >> "$_LUNAR_CLEANUP_REGISTRY"
 }
 
 
 # function : cleanup_unregister_pid
 # usage    : cleanup_unregister_pid <pid>
 # purpose  : remove a PID from the cleanup registry when it exits normally
+#            (no-op for file registry; _lunar_cleanup checks kill -0)
 cleanup_unregister_pid() {
-  local i
   debug_msg "cleanup_unregister_pid ($@)"
   _sd "UNREG pid: $1"
-  for i in "${!_LUNAR_CLEANUP_PIDS[@]}"; do
-    if [ "${_LUNAR_CLEANUP_PIDS[$i]}" = "$1" ]; then
-      unset '_LUNAR_CLEANUP_PIDS[$i]'
-      return 0
-    fi
-  done
 }
 
 
@@ -104,41 +101,46 @@ _lunar_cleanup() {
   _LUNAR_CLEANUP_DONE=1
 
   debug_msg "_lunar_cleanup ()"
-  _sd "CLEANUP START — files=${#_LUNAR_CLEANUP_FILES[@]} locks=${#_LUNAR_CLEANUP_LOCKS[@]} pids=${#_LUNAR_CLEANUP_PIDS[@]}"
 
-  # kill tracked child processes
-  local pid
-  for pid in "${_LUNAR_CLEANUP_PIDS[@]}"; do
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      _sd "  KILL pid=$pid"
-      kill -TERM "$pid" 2>/dev/null
-      wait "$pid" 2>/dev/null
-    else
-      _sd "  SKIP pid=$pid (not running)"
-    fi
-  done
+  if [ -n "$_LUNAR_CLEANUP_REGISTRY" ] && [ -f "$_LUNAR_CLEANUP_REGISTRY" ]; then
+    _sd "CLEANUP START (registry=$_LUNAR_CLEANUP_REGISTRY)"
 
-  # unlock registered locks
-  local lock
-  for lock in "${_LUNAR_CLEANUP_LOCKS[@]}"; do
-    if [ -n "$lock" ] && [ -f "$lock.lock" ]; then
-      _sd "  UNLOCK $lock.lock"
-      rm -f "$lock.lock" 2>/dev/null
-    fi
-  done
-
-  # remove registered temp files
-  local file
-  for file in "${_LUNAR_CLEANUP_FILES[@]}"; do
-    if [ -n "$file" ]; then
-      if [ -e "$file" ]; then
-        _sd "  RM $file"
-      else
-        _sd "  RM $file (already gone)"
+    # First pass: kill tracked child processes (PIDs)
+    local type path
+    while IFS=' ' read -r type path; do
+      if [ "$type" = "P" ] && [ -n "$path" ]; then
+        if kill -0 "$path" 2>/dev/null; then
+          _sd "  KILL pid=$path"
+          kill -TERM "$path" 2>/dev/null
+          wait "$path" 2>/dev/null
+        else
+          _sd "  SKIP pid=$path (not running)"
+        fi
       fi
-      rm -f "$file" 2>/dev/null
-    fi
-  done
+    done < "$_LUNAR_CLEANUP_REGISTRY"
+
+    # Second pass: unlock locks and remove temp files
+    while IFS=' ' read -r type path; do
+      case "$type" in
+        L)
+          if [ -n "$path" ] && [ -f "$path.lock" ]; then
+            _sd "  UNLOCK $path.lock"
+            rm -f "$path.lock" 2>/dev/null
+          fi
+          ;;
+        F)
+          if [ -n "$path" ]; then
+            _sd "  RM $path (exists=$([ -e "$path" ] && echo y || echo n))"
+            rm -f "$path" 2>/dev/null
+          fi
+          ;;
+      esac
+    done < "$_LUNAR_CLEANUP_REGISTRY"
+
+    rm -f "$_LUNAR_CLEANUP_REGISTRY"
+  else
+    _sd "CLEANUP START (no registry)"
+  fi
 
   # remove installation lock file if set
   if [ -n "$linING" ] && [ -f "$linING" ]; then
@@ -160,8 +162,19 @@ _lunar_cleanup() {
 #            dies from the actual signal, not from exit(N).
 lunar_setup_signals() {
   debug_msg "lunar_setup_signals ()"
-  _sd "SETUP traps installed"
+  # Create the file-based registry — $$ is the same in all subshells
+  # of this process, so command substitution subshells write here too
+  _LUNAR_CLEANUP_REGISTRY="/tmp/lunar-cleanup.$$.reg"
+  : > "$_LUNAR_CLEANUP_REGISTRY"
+  _sd "SETUP traps installed (registry=$_LUNAR_CLEANUP_REGISTRY)"
   trap '_sd "TRAP INT fired"; _lunar_cleanup; _sd "RE-RAISE INT"; trap - INT; kill -INT $BASHPID' INT
   trap '_sd "TRAP TERM fired"; _lunar_cleanup; _sd "RE-RAISE TERM"; trap - TERM; kill -TERM $BASHPID' TERM
-  trap '_exit_status=$?; _sd "TRAP EXIT fired (status=$_exit_status, cleanup_done=$_LUNAR_CLEANUP_DONE)"; [ "$_LUNAR_CLEANUP_DONE" = "0" ] && [ "$_exit_status" != "0" ] && _lunar_cleanup' EXIT
+  trap '
+    _exit_status=$?
+    _sd "TRAP EXIT fired (status=$_exit_status, cleanup_done=$_LUNAR_CLEANUP_DONE)"
+    if [ "$_LUNAR_CLEANUP_DONE" = "0" ] && [ "$_exit_status" != "0" ]; then
+      _lunar_cleanup
+    fi
+    rm -f "$_LUNAR_CLEANUP_REGISTRY" 2>/dev/null
+  ' EXIT
 }
