@@ -241,44 +241,22 @@ resurrect_modules() {
 
 
 lin_module()  {
-  # Save working directory — without the subshell, cd calls inside build
-  # functions would leak to the caller
-  local _saved_pwd="$PWD"
-
-  # Variables set by run_details / DETAILS file — declared local to prevent
-  # leaking into the caller (previously isolated by the subshell)
-  local SECTION SCRIPT_DIRECTORY VERSION SOURCE SOURCE_URL SOURCE_DIRECTORY
-  local MODULE_CONFIG MODULE_PREFIX MAX_SOURCES SHORT UPDATED
-  local LICENSE WEB_SITE ENTERED TYPE RATIONALE
-  local SOURCE2 SOURCE2_URL SOURCE3 SOURCE3_URL SOURCE4 SOURCE4_URL
-  local SOURCE_URL_FULL SOURCE2_URL_FULL SOURCE3_URL_FULL SOURCE4_URL_FULL
-  local PKG_CONFIG_PATH PATH LD_LIBRARY_PATH
-
-  # Variables set within lin_module
-  local INSTALLWATCHFILE linING LIN_ERROR OPTS
-  local C_LOG C_FIFO VOYEUR_PID
-
-  # Inner cleanup for lin_module-specific resources
-  _lin_module_cleanup() {
+(
+  # Trap for subshell-local resources: linING lock and installwatch file.
+  # The parent's _lunar_cleanup handles global resources (temp files, locks,
+  # PIDs registered via the cleanup registry). When Ctrl+C arrives, SIGINT
+  # is sent to the entire process group — both this subshell and the parent
+  # receive it and run their respective traps.
+  trap '
     [ -n "$linING" ] && [ -f "$linING" ] && rm -f "$linING"
     [ -n "$INSTALLWATCHFILE" ] && [ -f "$INSTALLWATCHFILE" ] && temp_destroy "$INSTALLWATCHFILE"
-  }
-
-  # Restore parent state: traps and working directory, preserving $?
-  _lin_module_finish() {
-    local _finish_rc=$?
-    trap '_lunar_cleanup' INT TERM
-    cd "$_saved_pwd" 2>/dev/null
-    return $_finish_rc
-  }
-
-  trap '_lin_module_cleanup; _lunar_cleanup' INT TERM
+    exit 1
+  ' INT TERM
 
   debug_msg "lin_module ($@)"
   xterm_msg "compiling $1"
   # make sure we got all the info
   if ! run_details $1 ; then
-    _lin_module_finish
     return 1
   fi
 
@@ -287,7 +265,6 @@ lin_module()  {
     # we also do not resurrect if $MODULE is currently installed!
     if ! module_installed $MODULE ; then
       if resurrect $MODULE ; then
-        _lin_module_finish
         return 0
       fi
     fi
@@ -308,11 +285,9 @@ lin_module()  {
       echo $$ > $linING       &&
       lget moonbase           &&
       rm -f $linING           &&
-      _lin_module_finish      &&
       return
     else
-      _lin_module_finish
-      return 1
+      exit 1
     fi
   fi
   check_blacklist             &&
@@ -365,7 +340,6 @@ lin_module()  {
       rm -f $linING
       report $COMPILE_LOGS/$MODULE-$VERSION.${COMPRESS_METHOD} "compile log" $MODULE $VERSION
       activity_log  "lin"  "$MODULE"  "$VERSION"  "failed" "Due to build errors during $LIN_ERROR"
-      _lin_module_finish
       return 1
     fi
 
@@ -389,7 +363,6 @@ lin_module()  {
       rm -f $linING
       report $COMPILE_LOGS/$MODULE-$VERSION.${COMPRESS_METHOD} "compile log" $MODULE $VERSION
       activity_log  "lin"  "$MODULE"  "$VERSION"  "failed" "Due to build errors during $LIN_ERROR"
-      _lin_module_finish
       return 1
     fi
 
@@ -404,10 +377,8 @@ lin_module()  {
       rm -f $linING
       report $COMPILE_LOGS/$MODULE-$VERSION.${COMPRESS_METHOD} "compile log" $MODULE $VERSION
       activity_log  "lin"  "$MODULE"  "$VERSION"  "failed" "Due to build errors during or after $LIN_ERROR"
-      _lin_module_finish
       return 1
     fi
   fi
-
-  _lin_module_finish
+)
 }
