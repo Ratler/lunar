@@ -133,5 +133,5 @@ _lunar_cleanup() {
 lunar_setup_signals() {
   debug_msg "lunar_setup_signals ()"
   trap '_lunar_cleanup' INT TERM
-  trap '[ "$_LUNAR_CLEANUP_DONE" = "0" ] && [ "$?" != "0" ] && _lunar_cleanup' EXIT
+  trap '_exit_status=$?; [ "$_LUNAR_CLEANUP_DONE" = "0" ] && [ "$_exit_status" != "0" ] && _lunar_cleanup' EXIT
 }

@@ -256,7 +256,7 @@ lin_module()  {
 
   # Variables set within lin_module
   local INSTALLWATCHFILE linING LIN_ERROR OPTS
-  local C_LOG C_FIFO
+  local C_LOG C_FIFO VOYEUR_PID
 
   # Inner cleanup for lin_module-specific resources
   _lin_module_cleanup() {
@@ -264,10 +264,12 @@ lin_module()  {
     [ -n "$INSTALLWATCHFILE" ] && [ -f "$INSTALLWATCHFILE" ] && temp_destroy "$INSTALLWATCHFILE"
   }
 
-  # Restore parent state: traps and working directory
+  # Restore parent state: traps and working directory, preserving $?
   _lin_module_finish() {
+    local _finish_rc=$?
     trap '_lunar_cleanup' INT TERM
     cd "$_saved_pwd" 2>/dev/null
+    return $_finish_rc
   }
 
   trap '_lin_module_cleanup; _lunar_cleanup' INT TERM
