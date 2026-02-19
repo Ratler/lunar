@@ -140,8 +140,8 @@ $ENTRY"
 
 
 # Queues for collecting post-event triggers before firing
-# CATALYST_QUEUE holds "reactor:action:param:watched" entries for lin/lrm/fix/exec
-# CATALYST_DEP_QUEUE holds "reactor:action:param:watched" entries for enable/disable
+# CATALYST_QUEUE holds "reactor:action:param:watched:event" entries for lin/lrm/fix/exec
+# CATALYST_DEP_QUEUE holds "reactor:action:param:watched:event" entries for enable/disable
 
 
 # function : reset_catalyst_queues
@@ -197,10 +197,10 @@ collect_catalyst() {
     else
       # post-events: separate enable/disable from other actions
       if [ "$ACTION" == "enable" ] || [ "$ACTION" == "disable" ] ; then
-        CATALYST_DEP_QUEUE+=("$REACTOR:$ACTION:$PARAM:$MODULE_NAME")
+        CATALYST_DEP_QUEUE+=("$REACTOR:$ACTION:$PARAM:$MODULE_NAME:$EVENT")
         debug_msg "collect_catalyst: queued dep action: $REACTOR:$ACTION:$PARAM"
       else
-        CATALYST_QUEUE+=("$REACTOR:$ACTION:$PARAM:$MODULE_NAME")
+        CATALYST_QUEUE+=("$REACTOR:$ACTION:$PARAM:$MODULE_NAME:$EVENT")
         debug_msg "collect_catalyst: queued action: $REACTOR:$ACTION:$PARAM"
       fi
     fi
@@ -213,21 +213,21 @@ collect_catalyst() {
 # purpose  : fire all collected post-event triggers — enable/disable first,
 #            then deduplicated lin/lrm/fix/exec actions
 fire_collected_catalysts() {
-  local ENTRY REACTOR ACTION PARAM WATCHED SEEN_KEY
+  local ENTRY REACTOR ACTION PARAM WATCHED EVENT SEEN_KEY
   debug_msg "fire_collected_catalysts ($@)"
 
   # phase 1: fire all enable/disable dep actions first
   for ENTRY in "${CATALYST_DEP_QUEUE[@]}" ; do
-    IFS=: read -r REACTOR ACTION PARAM WATCHED <<< "$ENTRY"
+    IFS=: read -r REACTOR ACTION PARAM WATCHED EVENT <<< "$ENTRY"
     debug_msg "fire_collected_catalysts: dep action $REACTOR $ACTION $PARAM"
-    fire_catalyst_action "$REACTOR" "$ACTION" "$PARAM" "$WATCHED" "on_install"
+    fire_catalyst_action "$REACTOR" "$ACTION" "$PARAM" "$WATCHED" "$EVENT"
   done
 
   # phase 2: deduplicate and fire remaining actions
   # dedup key is "reactor:action" — same reactor+action only fires once
   declare -A CATALYST_SEEN
   for ENTRY in "${CATALYST_QUEUE[@]}" ; do
-    IFS=: read -r REACTOR ACTION PARAM WATCHED <<< "$ENTRY"
+    IFS=: read -r REACTOR ACTION PARAM WATCHED EVENT <<< "$ENTRY"
     SEEN_KEY="$REACTOR:$ACTION"
     if [ -n "${CATALYST_SEEN[$SEEN_KEY]}" ] ; then
       debug_msg "fire_collected_catalysts: dedup skip $SEEN_KEY"
@@ -235,7 +235,7 @@ fire_collected_catalysts() {
     fi
     CATALYST_SEEN[$SEEN_KEY]=1
     debug_msg "fire_collected_catalysts: firing $REACTOR $ACTION $PARAM"
-    fire_catalyst_action "$REACTOR" "$ACTION" "$PARAM" "$WATCHED" "on_install"
+    fire_catalyst_action "$REACTOR" "$ACTION" "$PARAM" "$WATCHED" "$EVENT"
   done
 
   # clear queues after firing
@@ -427,11 +427,14 @@ fire_catalyst_action() {
         unset CATALYST_MODULE CATALYST_MODULE_VERSION
         return 1
       fi
-      # validate: script must be within the module's moonbase directory
-      case "$(readlink -f "$SCRIPT_DIR/$PARAM")" in
+      # validate: script must resolve within the module's moonbase directory
+      local RESOLVED_PATH
+      RESOLVED_PATH="$(readlink -f "$SCRIPT_DIR/$PARAM")"
+      case "$RESOLVED_PATH" in
         "$SCRIPT_DIR"/*) ;;
+        "$SCRIPT_DIR") ;;
         *)
-          debug_msg "fire_catalyst_action: path traversal blocked for $PARAM"
+          debug_msg "fire_catalyst_action: path traversal blocked for $PARAM (resolved to $RESOLVED_PATH)"
           unset CATALYST_MODULE CATALYST_MODULE_VERSION
           return 1
           ;;
