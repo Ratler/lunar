@@ -253,9 +253,8 @@ Hook into lin, lrm, and the moonbase update chain. Add the `--catalyst-immediate
     - Check visited set first; skip if already visited
     - Mark as visited
     - Before dispatching any action, set the catalyst environment variables:
-      - Call `run_details $watched_module` (in a subshell to avoid polluting current env) to get the watched module's VERSION
       - `export CATALYST_MODULE="$watched_module"`
-      - `export CATALYST_MODULE_VERSION="$watched_version"` (captured from subshell)
+      - `export CATALYST_MODULE_VERSION="$(module_version $watched_module)"`
     - Dispatch based on action:
       - `lin`: check if reactor is held (`module_held`), skip with warning if so; otherwise `verbose_msg` and call `lin $reactor`
       - `lrm`: `verbose_msg` and call `lrm $reactor`
@@ -268,7 +267,7 @@ Hook into lin, lrm, and the moonbase update chain. Add the `--catalyst-immediate
     - Log to `debug_msg` before and after each action
     - After `lin`/`lrm`/`fix`/`exec` actions complete, call `collect_catalyst $reactor $resulting_event` to check for cascading triggers (using the same visited set)
   - For the `exec` action, the script runs in a subshell with `MODULE`, `VERSION`, `SECTION`, `SCRIPT_DIRECTORY` set (same env as `run_module_file`), plus `CATALYST_MODULE` and `CATALYST_MODULE_VERSION`
-  - Implement helper `get_module_version()` that sources DETAILS in a subshell and echoes VERSION, to avoid polluting the caller's environment
+  - Use the existing `module_version()` function from modules.lunar to get the watched module's version
 - **Tests**: N/A (no test suite; verified through integration testing in tasks 8-9)
 
 ### 8. Integrate into lin
@@ -436,7 +435,7 @@ grep 'create_catalyst_cache' libs/moonbase.lunar
 grep 'CATALYST' libs/modules.lunar
 
 # Verify CATALYST_MODULE env var handling in action dispatcher
-grep -c 'CATALYST_MODULE\|CATALYST_MODULE_VERSION\|get_module_version' libs/catalyst.lunar
+grep -c 'CATALYST_MODULE\|CATALYST_MODULE_VERSION\|module_version' libs/catalyst.lunar
 ```
 
 ## Notes
