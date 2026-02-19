@@ -296,3 +296,71 @@ cleanup_catalyst_visited() {
     unset CATALYST_VISITED_FILE CATALYST_VISITED_OWNER
   fi
 }
+
+
+# function : catalyst_enable_dep
+# usage    : catalyst_enable_dep <reactor_module> <dep_module>
+# purpose  : flip an optional dependency from off to on in DEPENDS_STATUS
+catalyst_enable_dep() {
+  local REACTOR_MOD DEP_MOD
+  debug_msg "catalyst_enable_dep ($@)"
+  REACTOR_MOD="$1"
+  DEP_MOD="$2"
+
+  # check if the dep is already on — no-op
+  if grep -q "^$REACTOR_MOD:$DEP_MOD:on:optional:" "$DEPENDS_STATUS" ; then
+    debug_msg "catalyst_enable_dep: $REACTOR_MOD:$DEP_MOD already enabled"
+    return 0
+  fi
+
+  # check if the dep exists in off state
+  if ! grep -q "^$REACTOR_MOD:$DEP_MOD:off:optional:" "$DEPENDS_STATUS" ; then
+    debug_msg "catalyst_enable_dep: WARNING: no optional dep $REACTOR_MOD:$DEP_MOD found"
+    return 1
+  fi
+
+  lock_file $DEPENDS_STATUS_BACKUP &&
+  lock_file $DEPENDS_STATUS        &&
+  awk -F: -v mod="$REACTOR_MOD" -v dep="$DEP_MOD" \
+    'BEGIN {OFS=FS} $1==mod && $2==dep && $3=="off" && $4=="optional" {$3="on"} {print}' \
+    "$DEPENDS_STATUS_BACKUP" > $DEPENDS_STATUS &&
+  cp $DEPENDS_STATUS $DEPENDS_STATUS_BACKUP
+  unlock_file $DEPENDS_STATUS
+  unlock_file $DEPENDS_STATUS_BACKUP
+
+  verbose_msg "catalyst: enabled optional dep '$DEP_MOD' for '$REACTOR_MOD'"
+}
+
+
+# function : catalyst_disable_dep
+# usage    : catalyst_disable_dep <reactor_module> <dep_module>
+# purpose  : flip an optional dependency from on to off in DEPENDS_STATUS
+catalyst_disable_dep() {
+  local REACTOR_MOD DEP_MOD
+  debug_msg "catalyst_disable_dep ($@)"
+  REACTOR_MOD="$1"
+  DEP_MOD="$2"
+
+  # check if the dep is already off — no-op
+  if grep -q "^$REACTOR_MOD:$DEP_MOD:off:optional:" "$DEPENDS_STATUS" ; then
+    debug_msg "catalyst_disable_dep: $REACTOR_MOD:$DEP_MOD already disabled"
+    return 0
+  fi
+
+  # check if the dep exists in on state
+  if ! grep -q "^$REACTOR_MOD:$DEP_MOD:on:optional:" "$DEPENDS_STATUS" ; then
+    debug_msg "catalyst_disable_dep: WARNING: no optional dep $REACTOR_MOD:$DEP_MOD found"
+    return 1
+  fi
+
+  lock_file $DEPENDS_STATUS_BACKUP &&
+  lock_file $DEPENDS_STATUS        &&
+  awk -F: -v mod="$REACTOR_MOD" -v dep="$DEP_MOD" \
+    'BEGIN {OFS=FS} $1==mod && $2==dep && $3=="on" && $4=="optional" {$3="off"} {print}' \
+    "$DEPENDS_STATUS_BACKUP" > $DEPENDS_STATUS &&
+  cp $DEPENDS_STATUS $DEPENDS_STATUS_BACKUP
+  unlock_file $DEPENDS_STATUS
+  unlock_file $DEPENDS_STATUS_BACKUP
+
+  verbose_msg "catalyst: disabled optional dep '$DEP_MOD' for '$REACTOR_MOD'"
+}
