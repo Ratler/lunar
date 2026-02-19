@@ -301,8 +301,9 @@ cleanup_catalyst_visited() {
 # function : catalyst_enable_dep
 # usage    : catalyst_enable_dep <reactor_module> <dep_module>
 # purpose  : flip an optional dependency from off to on in DEPENDS_STATUS
+#            Uses add_depends() from depends.lunar to handle locking and file writes
 catalyst_enable_dep() {
-  local REACTOR_MOD DEP_MOD
+  local REACTOR_MOD DEP_MOD LINE ON_OPTS OFF_OPTS
   debug_msg "catalyst_enable_dep ($@)"
   REACTOR_MOD="$1"
   DEP_MOD="$2"
@@ -313,21 +314,17 @@ catalyst_enable_dep() {
     return 0
   fi
 
-  # check if the dep exists in off state
-  if ! grep -q "^$REACTOR_MOD:$DEP_MOD:off:optional:" "$DEPENDS_STATUS" ; then
+  # read the existing off entry to preserve configure opts
+  LINE=$(grep "^$REACTOR_MOD:$DEP_MOD:off:optional:" "$DEPENDS_STATUS")
+  if [ -z "$LINE" ] ; then
     debug_msg "catalyst_enable_dep: WARNING: no optional dep $REACTOR_MOD:$DEP_MOD found"
     return 1
   fi
 
-  lock_file $DEPENDS_STATUS_BACKUP &&
-  lock_file $DEPENDS_STATUS        &&
-  awk -F: -v mod="$REACTOR_MOD" -v dep="$DEP_MOD" \
-    'BEGIN {OFS=FS} $1==mod && $2==dep && $3=="off" && $4=="optional" {$3="on"} {print}' \
-    "$DEPENDS_STATUS_BACKUP" > $DEPENDS_STATUS &&
-  cp $DEPENDS_STATUS $DEPENDS_STATUS_BACKUP
-  unlock_file $DEPENDS_STATUS
-  unlock_file $DEPENDS_STATUS_BACKUP
+  ON_OPTS=$(echo "$LINE" | cut -d: -f5)
+  OFF_OPTS=$(echo "$LINE" | cut -d: -f6)
 
+  add_depends "$REACTOR_MOD" "$DEP_MOD" "on" "optional" "$ON_OPTS" "$OFF_OPTS"
   verbose_msg "catalyst: enabled optional dep '$DEP_MOD' for '$REACTOR_MOD'"
 }
 
@@ -335,8 +332,9 @@ catalyst_enable_dep() {
 # function : catalyst_disable_dep
 # usage    : catalyst_disable_dep <reactor_module> <dep_module>
 # purpose  : flip an optional dependency from on to off in DEPENDS_STATUS
+#            Uses add_depends() from depends.lunar to handle locking and file writes
 catalyst_disable_dep() {
-  local REACTOR_MOD DEP_MOD
+  local REACTOR_MOD DEP_MOD LINE ON_OPTS OFF_OPTS
   debug_msg "catalyst_disable_dep ($@)"
   REACTOR_MOD="$1"
   DEP_MOD="$2"
@@ -347,21 +345,17 @@ catalyst_disable_dep() {
     return 0
   fi
 
-  # check if the dep exists in on state
-  if ! grep -q "^$REACTOR_MOD:$DEP_MOD:on:optional:" "$DEPENDS_STATUS" ; then
+  # read the existing on entry to preserve configure opts
+  LINE=$(grep "^$REACTOR_MOD:$DEP_MOD:on:optional:" "$DEPENDS_STATUS")
+  if [ -z "$LINE" ] ; then
     debug_msg "catalyst_disable_dep: WARNING: no optional dep $REACTOR_MOD:$DEP_MOD found"
     return 1
   fi
 
-  lock_file $DEPENDS_STATUS_BACKUP &&
-  lock_file $DEPENDS_STATUS        &&
-  awk -F: -v mod="$REACTOR_MOD" -v dep="$DEP_MOD" \
-    'BEGIN {OFS=FS} $1==mod && $2==dep && $3=="on" && $4=="optional" {$3="off"} {print}' \
-    "$DEPENDS_STATUS_BACKUP" > $DEPENDS_STATUS &&
-  cp $DEPENDS_STATUS $DEPENDS_STATUS_BACKUP
-  unlock_file $DEPENDS_STATUS
-  unlock_file $DEPENDS_STATUS_BACKUP
+  ON_OPTS=$(echo "$LINE" | cut -d: -f5)
+  OFF_OPTS=$(echo "$LINE" | cut -d: -f6)
 
+  add_depends "$REACTOR_MOD" "$DEP_MOD" "off" "optional" "$ON_OPTS" "$OFF_OPTS"
   verbose_msg "catalyst: disabled optional dep '$DEP_MOD' for '$REACTOR_MOD'"
 }
 
