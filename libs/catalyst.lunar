@@ -107,3 +107,33 @@ create_catalyst_cache()
     verbose_msg "Skipping catalyst cache regeneration"
   fi
 )}
+
+
+# function : load_catalyst_cache
+# usage    : load_catalyst_cache
+# purpose  : load catalyst.cache into CATALYST_TRIGGERS associative array
+#            Key: "watched:event", Value: newline-separated "reactor:action:param" entries
+load_catalyst_cache() {
+  local WATCHED EVENT REACTOR ACTION PARAM KEY ENTRY
+  debug_msg "load_catalyst_cache ($@)"
+
+  declare -gA CATALYST_TRIGGERS
+
+  if [ ! -f "$CATALYST_CACHE" ] ; then
+    debug_msg "load_catalyst_cache: no cache file, no triggers available"
+    return 0
+  fi
+
+  while IFS=: read -r WATCHED EVENT REACTOR ACTION PARAM ; do
+    KEY="$WATCHED:$EVENT"
+    ENTRY="$REACTOR:$ACTION:$PARAM"
+    if [ -n "${CATALYST_TRIGGERS[$KEY]}" ] ; then
+      CATALYST_TRIGGERS[$KEY]="${CATALYST_TRIGGERS[$KEY]}
+$ENTRY"
+    else
+      CATALYST_TRIGGERS[$KEY]="$ENTRY"
+    fi
+  done < "$CATALYST_CACHE"
+
+  debug_msg "load_catalyst_cache: loaded ${#CATALYST_TRIGGERS[@]} trigger keys"
+}
