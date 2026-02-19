@@ -11,14 +11,16 @@
 # removed.                                                 #
 #                                                          #
 # CATALYST file format (one rule per line, # comments):    #
-#   <event> <watched_module> <action> [param]              #
+#   <event> <watched_module> <action> [param] [immediate]  #
 #                                                          #
 # Events: on_install, on_pre_install, on_remove,           #
 #         on_pre_remove                                    #
 # Actions: lin, lrm, fix, enable, disable, exec            #
+# Flags:  immediate — fire after this module instead of    #
+#         waiting for the batch (bypasses dedup)           #
 #                                                          #
 # Cache format (flat file, one entry per line):            #
-#   watched_module:event:reactor_module:action:param       #
+#   watched_module:event:reactor_module:action:param:flags #
 #                                                          #
 # At runtime the cache is loaded into a bash associative   #
 # array keyed by "watched:event" for O(1) lookups.         #
@@ -40,7 +42,7 @@ CATALYST_VALID_ACTIONS="lin lrm fix enable disable exec"
 # purpose  : rebuild the catalyst.cache from all CATALYST files in moonbase
 create_catalyst_cache()
 {(
-  local TMP_CACHE CATFILES CATFILE MODULE SECTION LINE EVENT WATCHED ACTION PARAM
+  local TMP_CACHE CATFILES CATFILE MODULE SECTION LINE EVENT WATCHED ACTION PARAM EXTRA FLAGS
   debug_msg "create_catalyst_cache ($@)"
 
   if [[ ! -w $CATALYST_CACHE && -e $CATALYST_CACHE ]] ; then
@@ -76,8 +78,17 @@ create_catalyst_cache()
         [[ "$LINE" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${LINE// /}" ]] && continue
 
-        # parse fields: event watched_module action [param]
-        read -r EVENT WATCHED ACTION PARAM <<< "$LINE"
+        # parse fields: event watched_module action [param] [immediate]
+        read -r EVENT WATCHED ACTION PARAM EXTRA <<< "$LINE"
+
+        # detect immediate flag in param or extra position
+        FLAGS=""
+        if [ "$EXTRA" == "immediate" ] ; then
+          FLAGS="immediate"
+        elif [ "$PARAM" == "immediate" ] ; then
+          FLAGS="immediate"
+          PARAM=""
+        fi
 
         # validate event
         if ! echo "$CATALYST_VALID_EVENTS" | grep -qw "$EVENT" ; then
@@ -97,7 +108,7 @@ create_catalyst_cache()
           continue
         fi
 
-        echo "$WATCHED:$EVENT:$MODULE:$ACTION:$PARAM"
+        echo "$WATCHED:$EVENT:$MODULE:$ACTION:$PARAM:$FLAGS"
       done < "$CATFILE"
     done > $TMP_CACHE &&
     install -m644 $TMP_CACHE $CATALYST_CACHE
@@ -112,9 +123,9 @@ create_catalyst_cache()
 # function : load_catalyst_cache
 # usage    : load_catalyst_cache
 # purpose  : load catalyst.cache into CATALYST_TRIGGERS associative array
-#            Key: "watched:event", Value: newline-separated "reactor:action:param" entries
+#            Key: "watched:event", Value: newline-separated "reactor:action:param:flags" entries
 load_catalyst_cache() {
-  local WATCHED EVENT REACTOR ACTION PARAM KEY ENTRY
+  local WATCHED EVENT REACTOR ACTION PARAM FLAGS KEY ENTRY
   debug_msg "load_catalyst_cache ($@)"
 
   declare -gA CATALYST_TRIGGERS
@@ -124,9 +135,9 @@ load_catalyst_cache() {
     return 0
   fi
 
-  while IFS=: read -r WATCHED EVENT REACTOR ACTION PARAM ; do
+  while IFS=: read -r WATCHED EVENT REACTOR ACTION PARAM FLAGS ; do
     KEY="$WATCHED:$EVENT"
-    ENTRY="$REACTOR:$ACTION:$PARAM"
+    ENTRY="$REACTOR:$ACTION:$PARAM:$FLAGS"
     if [ -n "${CATALYST_TRIGGERS[$KEY]}" ] ; then
       CATALYST_TRIGGERS[$KEY]="${CATALYST_TRIGGERS[$KEY]}
 $ENTRY"
@@ -159,7 +170,7 @@ reset_catalyst_queues() {
 # purpose  : look up triggers for a module+event and either fire immediately
 #            (pre-events) or add to the queue (post-events)
 collect_catalyst() {
-  local MODULE_NAME EVENT KEY ENTRIES ENTRY REACTOR ACTION PARAM
+  local MODULE_NAME EVENT KEY ENTRIES ENTRY REACTOR ACTION PARAM FLAGS
   debug_msg "collect_catalyst ($@)"
   MODULE_NAME="$1"
   EVENT="$2"
@@ -182,7 +193,7 @@ collect_catalyst() {
 
   while IFS= read -r ENTRY ; do
     [ -z "$ENTRY" ] && continue
-    IFS=: read -r REACTOR ACTION PARAM <<< "$ENTRY"
+    IFS=: read -r REACTOR ACTION PARAM FLAGS <<< "$ENTRY"
 
     # only fire if the reactor module is currently installed
     if ! module_installed "$REACTOR" ; then
@@ -190,9 +201,10 @@ collect_catalyst() {
       continue
     fi
 
-    # pre-events fire immediately
-    if [ "$EVENT" == "on_pre_install" ] || [ "$EVENT" == "on_pre_remove" ] ; then
-      debug_msg "collect_catalyst: pre-event, firing immediately: $REACTOR $ACTION $PARAM"
+    # fire immediately if: pre-event, immediate flag, or --catalyst-immediate mode
+    if [ "$EVENT" == "on_pre_install" ] || [ "$EVENT" == "on_pre_remove" ] || \
+       [ "$FLAGS" == "immediate" ] || [ "$CATALYST_IMMEDIATE" == "1" ] ; then
+      debug_msg "collect_catalyst: firing immediately: $REACTOR $ACTION $PARAM (flags=$FLAGS)"
       fire_catalyst_action "$REACTOR" "$ACTION" "$PARAM" "$MODULE_NAME" "$EVENT"
     else
       # post-events: separate enable/disable from other actions

@@ -177,20 +177,16 @@ main() {
               if [ -e "$TMP_LIN_SUCCESS" ]; then
                 echo "$MODULE" >>$TMP_LIN_SUCCESS
               fi
-              # CATALYST: collect post-install triggers
+              # CATALYST: collect post-install triggers (immediate entries fire now,
+              # others are queued for batch firing after all modules complete)
               collect_catalyst "$MODULE" on_install
-              if [ "$CATALYST_IMMEDIATE" == "1" ] ; then
-                fire_collected_catalysts
-              fi
             fi
           fi
         fi
       done
 
-      # CATALYST: fire collected post-install triggers (batch mode)
-      if [ "$CATALYST_IMMEDIATE" != "1" ] ; then
-        fire_collected_catalysts
-      fi
+      # CATALYST: fire any remaining queued post-install triggers
+      fire_collected_catalysts
     fi
 
     # cleanups that we need to do
