@@ -81,6 +81,31 @@ on_remove libwebp lin
 | `disable` | Flip optional dep to 'off' in DEPENDS_STATUS | dep name (defaults to watched module) |
 | `exec` | Run named script from module's moonbase dir | script filename (required) |
 
+### Environment Variables
+
+When a CATALYST action fires, two environment variables are exported so the reactor's BUILD (or exec script) knows which module triggered the action:
+
+- `CATALYST_MODULE` — the name of the watched module that caused the trigger (e.g., `linux-lts`)
+- `CATALYST_MODULE_VERSION` — the version of the watched module (e.g., `6.12.1`)
+
+These are populated from the watched module's DETAILS file (via `run_details`) before firing the action. They are **cleared after each `lin_module` completes** in the reactor to prevent stale values leaking into non-catalyst builds.
+
+Example use case: nvidia has two CATALYST lines watching `linux` and `linux-lts`. When `lin linux-lts` completes, nvidia's BUILD script can use `$CATALYST_MODULE` to find the right kernel source tree at `/usr/src/linux-lts-$CATALYST_MODULE_VERSION/`.
+
+```bash
+# nvidia/CATALYST
+on_install linux lin
+on_install linux-lts lin
+
+# nvidia/BUILD (excerpt)
+if [ -n "$CATALYST_MODULE" ]; then
+  KERNEL_SRC="/usr/src/${CATALYST_MODULE}-${CATALYST_MODULE_VERSION}"
+else
+  # Normal build — user-selected kernel source
+  KERNEL_SRC="/usr/src/linux-$(uname -r)"
+fi
+```
+
 ### Execution Rules
 
 - `enable`/`disable` actions always execute before `lin`/`lrm`/`fix`/`exec`
@@ -90,6 +115,7 @@ on_remove libwebp lin
 - `on_remove`/`on_pre_remove` do NOT fire during `lin -u` upgrades (`UPGRADE=on`)
 - `lin` action on held modules is skipped with a warning
 - A visited set prevents infinite trigger loops (exact `watched:event:reactor:action` tuples tracked)
+- `CATALYST_MODULE` and `CATALYST_MODULE_VERSION` are set before each action and cleared after each reactor's `lin_module` completes
 
 ### Cache Format
 
@@ -226,6 +252,10 @@ Hook into lin, lrm, and the moonbase update chain. Add the `--catalyst-immediate
   - Implement `fire_catalyst_action()` accepting `$1=reactor`, `$2=action`, `$3=param`, `$4=watched_module`, `$5=event`:
     - Check visited set first; skip if already visited
     - Mark as visited
+    - Before dispatching any action, set the catalyst environment variables:
+      - Call `run_details $watched_module` (in a subshell to avoid polluting current env) to get the watched module's VERSION
+      - `export CATALYST_MODULE="$watched_module"`
+      - `export CATALYST_MODULE_VERSION="$watched_version"` (captured from subshell)
     - Dispatch based on action:
       - `lin`: check if reactor is held (`module_held`), skip with warning if so; otherwise `verbose_msg` and call `lin $reactor`
       - `lrm`: `verbose_msg` and call `lrm $reactor`
@@ -234,9 +264,11 @@ Hook into lin, lrm, and the moonbase update chain. Add the `--catalyst-immediate
       - `disable`: call `catalyst_disable_dep $reactor ${param:-$watched_module}`
       - `exec`: find the script in the reactor's moonbase directory (`$MOONBASE/$SECTION/$reactor/$param`), check it exists, source it in a subshell
       - Unknown action: `debug_msg` warning, skip
+    - After the action completes, clear the catalyst env vars: `unset CATALYST_MODULE CATALYST_MODULE_VERSION`
     - Log to `debug_msg` before and after each action
     - After `lin`/`lrm`/`fix`/`exec` actions complete, call `collect_catalyst $reactor $resulting_event` to check for cascading triggers (using the same visited set)
-  - For the `exec` action, the script runs in a subshell with `MODULE`, `VERSION`, `SECTION`, `SCRIPT_DIRECTORY` set (same env as `run_module_file`)
+  - For the `exec` action, the script runs in a subshell with `MODULE`, `VERSION`, `SECTION`, `SCRIPT_DIRECTORY` set (same env as `run_module_file`), plus `CATALYST_MODULE` and `CATALYST_MODULE_VERSION`
+  - Implement helper `get_module_version()` that sources DETAILS in a subshell and echoes VERSION, to avoid polluting the caller's environment
 - **Tests**: N/A (no test suite; verified through integration testing in tasks 8-9)
 
 ### 8. Integrate into lin
@@ -371,6 +403,8 @@ Hook into lin, lrm, and the moonbase update chain. Add the `--catalyst-immediate
 13. Cache is lazily invalidated when CATALYST files are newer than the cache
 14. `bash -n libs/catalyst.lunar` passes without syntax errors
 15. All functions include `debug_msg` calls for traceability with `lin -d`
+16. `CATALYST_MODULE` and `CATALYST_MODULE_VERSION` are set before each action fires and cleared after each action completes
+17. `CATALYST_MODULE`/`CATALYST_MODULE_VERSION` are not present during normal (non-catalyst) builds
 
 ## Validation Commands
 
@@ -400,6 +434,9 @@ grep 'create_catalyst_cache' libs/moonbase.lunar
 
 # Verify lazy invalidation
 grep 'CATALYST' libs/modules.lunar
+
+# Verify CATALYST_MODULE env var handling in action dispatcher
+grep -c 'CATALYST_MODULE\|CATALYST_MODULE_VERSION\|get_module_version' libs/catalyst.lunar
 ```
 
 ## Notes
