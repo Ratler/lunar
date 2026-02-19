@@ -137,3 +137,107 @@ $ENTRY"
 
   debug_msg "load_catalyst_cache: loaded ${#CATALYST_TRIGGERS[@]} trigger keys"
 }
+
+
+# Queues for collecting post-event triggers before firing
+# CATALYST_QUEUE holds "reactor:action:param:watched" entries for lin/lrm/fix/exec
+# CATALYST_DEP_QUEUE holds "reactor:action:param:watched" entries for enable/disable
+
+
+# function : reset_catalyst_queues
+# usage    : reset_catalyst_queues
+# purpose  : clear trigger queues at the start of a lin/lrm session
+reset_catalyst_queues() {
+  debug_msg "reset_catalyst_queues ($@)"
+  CATALYST_QUEUE=()
+  CATALYST_DEP_QUEUE=()
+}
+
+
+# function : collect_catalyst
+# usage    : collect_catalyst <module> <event>
+# purpose  : look up triggers for a module+event and either fire immediately
+#            (pre-events) or add to the queue (post-events)
+collect_catalyst() {
+  local MODULE_NAME EVENT KEY ENTRIES ENTRY REACTOR ACTION PARAM
+  debug_msg "collect_catalyst ($@)"
+  MODULE_NAME="$1"
+  EVENT="$2"
+
+  # do not fire triggers during upgrades (lrm -u called by lin)
+  if [ "$UPGRADE" == "on" ] ; then
+    debug_msg "collect_catalyst: skipping triggers during upgrade"
+    return 0
+  fi
+
+  KEY="$MODULE_NAME:$EVENT"
+  ENTRIES="${CATALYST_TRIGGERS[$KEY]}"
+
+  if [ -z "$ENTRIES" ] ; then
+    debug_msg "collect_catalyst: no triggers for $KEY"
+    return 0
+  fi
+
+  debug_msg "collect_catalyst: found triggers for $KEY"
+
+  while IFS= read -r ENTRY ; do
+    [ -z "$ENTRY" ] && continue
+    IFS=: read -r REACTOR ACTION PARAM <<< "$ENTRY"
+
+    # only fire if the reactor module is currently installed
+    if ! module_installed "$REACTOR" ; then
+      debug_msg "collect_catalyst: reactor '$REACTOR' not installed, skipping"
+      continue
+    fi
+
+    # pre-events fire immediately
+    if [ "$EVENT" == "on_pre_install" ] || [ "$EVENT" == "on_pre_remove" ] ; then
+      debug_msg "collect_catalyst: pre-event, firing immediately: $REACTOR $ACTION $PARAM"
+      fire_catalyst_action "$REACTOR" "$ACTION" "$PARAM" "$MODULE_NAME" "$EVENT"
+    else
+      # post-events: separate enable/disable from other actions
+      if [ "$ACTION" == "enable" ] || [ "$ACTION" == "disable" ] ; then
+        CATALYST_DEP_QUEUE+=("$REACTOR:$ACTION:$PARAM:$MODULE_NAME")
+        debug_msg "collect_catalyst: queued dep action: $REACTOR:$ACTION:$PARAM"
+      else
+        CATALYST_QUEUE+=("$REACTOR:$ACTION:$PARAM:$MODULE_NAME")
+        debug_msg "collect_catalyst: queued action: $REACTOR:$ACTION:$PARAM"
+      fi
+    fi
+  done <<< "$ENTRIES"
+}
+
+
+# function : fire_collected_catalysts
+# usage    : fire_collected_catalysts
+# purpose  : fire all collected post-event triggers — enable/disable first,
+#            then deduplicated lin/lrm/fix/exec actions
+fire_collected_catalysts() {
+  local ENTRY REACTOR ACTION PARAM WATCHED SEEN_KEY
+  debug_msg "fire_collected_catalysts ($@)"
+
+  # phase 1: fire all enable/disable dep actions first
+  for ENTRY in "${CATALYST_DEP_QUEUE[@]}" ; do
+    IFS=: read -r REACTOR ACTION PARAM WATCHED <<< "$ENTRY"
+    debug_msg "fire_collected_catalysts: dep action $REACTOR $ACTION $PARAM"
+    fire_catalyst_action "$REACTOR" "$ACTION" "$PARAM" "$WATCHED" "on_install"
+  done
+
+  # phase 2: deduplicate and fire remaining actions
+  # dedup key is "reactor:action" — same reactor+action only fires once
+  declare -A CATALYST_SEEN
+  for ENTRY in "${CATALYST_QUEUE[@]}" ; do
+    IFS=: read -r REACTOR ACTION PARAM WATCHED <<< "$ENTRY"
+    SEEN_KEY="$REACTOR:$ACTION"
+    if [ -n "${CATALYST_SEEN[$SEEN_KEY]}" ] ; then
+      debug_msg "fire_collected_catalysts: dedup skip $SEEN_KEY"
+      continue
+    fi
+    CATALYST_SEEN[$SEEN_KEY]=1
+    debug_msg "fire_collected_catalysts: firing $REACTOR $ACTION $PARAM"
+    fire_catalyst_action "$REACTOR" "$ACTION" "$PARAM" "$WATCHED" "on_install"
+  done
+
+  # clear queues after firing
+  reset_catalyst_queues
+}
