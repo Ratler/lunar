@@ -1,0 +1,109 @@
+#!/bin/bash
+#                                                          #
+# This code is written for Lunar Linux, see                #
+# http://lunar-linux.org                                   #
+#                                                          #
+############################################################
+#                                                          #
+# $FUNCTIONS/catalyst                                      #
+# CATALYST trigger system — allows modules to declare      #
+# reactive behavior when other modules are installed or    #
+# removed.                                                 #
+#                                                          #
+# CATALYST file format (one rule per line, # comments):    #
+#   <event> <watched_module> <action> [param]              #
+#                                                          #
+# Events: on_install, on_pre_install, on_remove,           #
+#         on_pre_remove                                    #
+# Actions: lin, lrm, fix, enable, disable, exec            #
+#                                                          #
+# Cache format (flat file, one entry per line):            #
+#   watched_module:event:reactor_module:action:param       #
+#                                                          #
+# At runtime the cache is loaded into a bash associative   #
+# array keyed by "watched:event" for O(1) lookups.         #
+#                                                          #
+############################################################
+#                                                          #
+# Copyright Stefan Wold 2026 under GPLv2                   #
+#                                                          #
+############################################################
+
+
+# Valid events and actions for CATALYST file validation
+CATALYST_VALID_EVENTS="on_install on_pre_install on_remove on_pre_remove"
+CATALYST_VALID_ACTIONS="lin lrm fix enable disable exec"
+
+
+# function : create_catalyst_cache
+# usage    : create_catalyst_cache
+# purpose  : rebuild the catalyst.cache from all CATALYST files in moonbase
+create_catalyst_cache()
+{(
+  local TMP_CACHE CATFILES CATFILE MODULE SECTION LINE EVENT WATCHED ACTION PARAM
+  debug_msg "create_catalyst_cache ($@)"
+
+  if [[ ! -w $CATALYST_CACHE && -e $CATALYST_CACHE ]] ; then
+    return 1
+  fi
+
+  if [ $MODULE_INDEX -nt $CATALYST_CACHE ] ; then
+    verbose_msg "Generating a new catalyst cache..."
+    TMP_CACHE=$(temp_create "catalyst.cache")
+
+    # speedups for system moonbases:
+    if [ "$MOONBASE" == "/var/lib/lunar/moonbase" ] && [ -f "$INSTALL_LOGS/moonbase-$(installed_version moonbase)" ] ; then
+      CATFILES=$(grep "/CATALYST$" "$INSTALL_LOGS/moonbase-$(installed_version moonbase)")
+      # don't forget zlocal:
+      if [ "$ZLOCAL_OVERRIDES" == "on" ] ; then
+        CATFILES="$CATFILES $(find $MOONBASE/zlocal -type f -name CATALYST)"
+      fi
+    else
+      if [ "$ZLOCAL_OVERRIDES" != "on" ] ; then
+        CATFILES=$(find $MOONBASE -type f -name CATALYST ! -regex "$MOONBASE/zlocal/.*")
+      else
+        CATFILES=$(find $MOONBASE -type f -name CATALYST)
+      fi
+    fi
+
+    for CATFILE in $CATFILES ; do
+      # extract reactor module name from path: .../section/module/CATALYST
+      SECTION=${CATFILE%/*}
+      MODULE=${SECTION##*/}
+
+      while IFS= read -r LINE ; do
+        # skip comments and blank lines
+        [[ "$LINE" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${LINE// /}" ]] && continue
+
+        # parse fields: event watched_module action [param]
+        read -r EVENT WATCHED ACTION PARAM <<< "$LINE"
+
+        # validate event
+        if ! echo "$CATALYST_VALID_EVENTS" | grep -qw "$EVENT" ; then
+          debug_msg "create_catalyst_cache: WARNING: unknown event '$EVENT' in $CATFILE"
+          continue
+        fi
+
+        # validate action
+        if ! echo "$CATALYST_VALID_ACTIONS" | grep -qw "$ACTION" ; then
+          debug_msg "create_catalyst_cache: WARNING: unknown action '$ACTION' in $CATFILE"
+          continue
+        fi
+
+        # exec requires a param
+        if [ "$ACTION" == "exec" ] && [ -z "$PARAM" ] ; then
+          debug_msg "create_catalyst_cache: WARNING: exec action without script in $CATFILE"
+          continue
+        fi
+
+        echo "$WATCHED:$EVENT:$MODULE:$ACTION:$PARAM"
+      done < "$CATFILE"
+    done > $TMP_CACHE &&
+    install -m644 $TMP_CACHE $CATALYST_CACHE
+
+    temp_destroy $TMP_CACHE
+  else
+    verbose_msg "Skipping catalyst cache regeneration"
+  fi
+)}
