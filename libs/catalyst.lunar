@@ -241,3 +241,58 @@ fire_collected_catalysts() {
   # clear queues after firing
   reset_catalyst_queues
 }
+
+
+# function : init_catalyst_visited
+# usage    : init_catalyst_visited
+# purpose  : create or reuse a visited set temp file for loop protection.
+#            The file is shared across child lin processes via an exported env var.
+init_catalyst_visited() {
+  debug_msg "init_catalyst_visited ($@)"
+  if [ -n "$CATALYST_VISITED_FILE" ] && [ -f "$CATALYST_VISITED_FILE" ] ; then
+    debug_msg "init_catalyst_visited: reusing existing visited file"
+    return 0
+  fi
+  CATALYST_VISITED_FILE=$(temp_create "catalyst_visited")
+  export CATALYST_VISITED_FILE
+  CATALYST_VISITED_OWNER=1
+  debug_msg "init_catalyst_visited: created $CATALYST_VISITED_FILE"
+}
+
+
+# function : check_catalyst_visited
+# usage    : check_catalyst_visited "watched:event:reactor:action"
+# purpose  : return 0 if the exact trigger tuple has already been visited
+check_catalyst_visited() {
+  debug_msg "check_catalyst_visited ($@)"
+  if [ -n "$CATALYST_VISITED_FILE" ] && [ -f "$CATALYST_VISITED_FILE" ] ; then
+    if grep -qxF "$1" "$CATALYST_VISITED_FILE" ; then
+      debug_msg "check_catalyst_visited: already visited: $1"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+
+# function : mark_catalyst_visited
+# usage    : mark_catalyst_visited "watched:event:reactor:action"
+# purpose  : record a trigger tuple as visited to prevent re-firing
+mark_catalyst_visited() {
+  debug_msg "mark_catalyst_visited ($@)"
+  if [ -n "$CATALYST_VISITED_FILE" ] ; then
+    echo "$1" >> "$CATALYST_VISITED_FILE"
+  fi
+}
+
+
+# function : cleanup_catalyst_visited
+# usage    : cleanup_catalyst_visited
+# purpose  : remove the visited set temp file if we own it
+cleanup_catalyst_visited() {
+  debug_msg "cleanup_catalyst_visited ($@)"
+  if [ -n "$CATALYST_VISITED_OWNER" ] && [ -n "$CATALYST_VISITED_FILE" ] ; then
+    temp_destroy "$CATALYST_VISITED_FILE"
+    unset CATALYST_VISITED_FILE CATALYST_VISITED_OWNER
+  fi
+}
