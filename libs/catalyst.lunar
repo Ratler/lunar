@@ -364,3 +364,94 @@ catalyst_disable_dep() {
 
   verbose_msg "catalyst: disabled optional dep '$DEP_MOD' for '$REACTOR_MOD'"
 }
+
+
+# function : fire_catalyst_action
+# usage    : fire_catalyst_action <reactor> <action> <param> <watched_module> <event>
+# purpose  : dispatch a single catalyst trigger action with loop protection
+fire_catalyst_action() {
+  local REACTOR ACTION PARAM WATCHED_MODULE EVENT VISITED_KEY SECTION SCRIPT_DIR
+  debug_msg "fire_catalyst_action ($@)"
+  REACTOR="$1"
+  ACTION="$2"
+  PARAM="$3"
+  WATCHED_MODULE="$4"
+  EVENT="$5"
+
+  # loop protection via visited set
+  VISITED_KEY="$WATCHED_MODULE:$EVENT:$REACTOR:$ACTION"
+  if check_catalyst_visited "$VISITED_KEY" ; then
+    debug_msg "fire_catalyst_action: loop detected, skipping $VISITED_KEY"
+    return 0
+  fi
+  mark_catalyst_visited "$VISITED_KEY"
+
+  # set catalyst environment variables so reactor BUILD/exec scripts
+  # know which module triggered the action
+  export CATALYST_MODULE="$WATCHED_MODULE"
+  export CATALYST_MODULE_VERSION="$(module_version $WATCHED_MODULE)"
+
+  case "$ACTION" in
+    lin)
+      if module_held "$REACTOR" ; then
+        message "${LRM_COLOR}Notice:${DEFAULT_COLOR}${MESSAGE_COLOR} CATALYST: skipping lin of held module ${MODULE_COLOR}$REACTOR${DEFAULT_COLOR}"
+      else
+        verbose_msg "CATALYST: ${REACTOR} triggered by ${WATCHED_MODULE} ($EVENT) — rebuilding"
+        lin "$REACTOR"
+      fi
+      ;;
+    lrm)
+      verbose_msg "CATALYST: ${REACTOR} triggered by ${WATCHED_MODULE} ($EVENT) — removing"
+      lrm "$REACTOR"
+      ;;
+    fix)
+      verbose_msg "CATALYST: ${REACTOR} triggered by ${WATCHED_MODULE} ($EVENT) — fixing"
+      lunar fix "$REACTOR"
+      ;;
+    enable)
+      catalyst_enable_dep "$REACTOR" "${PARAM:-$WATCHED_MODULE}"
+      ;;
+    disable)
+      catalyst_disable_dep "$REACTOR" "${PARAM:-$WATCHED_MODULE}"
+      ;;
+    exec)
+      SECTION=$(find_section "$REACTOR")
+      if [ -z "$SECTION" ] ; then
+        debug_msg "fire_catalyst_action: cannot find section for $REACTOR"
+        unset CATALYST_MODULE CATALYST_MODULE_VERSION
+        return 1
+      fi
+      SCRIPT_DIR="$MOONBASE/$SECTION/$REACTOR"
+      if [ ! -f "$SCRIPT_DIR/$PARAM" ] ; then
+        debug_msg "fire_catalyst_action: script '$PARAM' not found in $SCRIPT_DIR"
+        unset CATALYST_MODULE CATALYST_MODULE_VERSION
+        return 1
+      fi
+      # validate: script must be within the module's moonbase directory
+      case "$(readlink -f "$SCRIPT_DIR/$PARAM")" in
+        "$SCRIPT_DIR"/*) ;;
+        *)
+          debug_msg "fire_catalyst_action: path traversal blocked for $PARAM"
+          unset CATALYST_MODULE CATALYST_MODULE_VERSION
+          return 1
+          ;;
+      esac
+      verbose_msg "CATALYST: ${REACTOR} triggered by ${WATCHED_MODULE} ($EVENT) — exec $PARAM"
+      (
+        MODULE="$REACTOR"
+        SCRIPT_DIRECTORY="$SCRIPT_DIR"
+        run_details "$REACTOR" &>/dev/null
+        . "$SCRIPT_DIR/$PARAM"
+      )
+      ;;
+    *)
+      debug_msg "fire_catalyst_action: unknown action '$ACTION'"
+      unset CATALYST_MODULE CATALYST_MODULE_VERSION
+      return 1
+      ;;
+  esac
+
+  # clear catalyst env vars after action completes
+  unset CATALYST_MODULE CATALYST_MODULE_VERSION
+  debug_msg "fire_catalyst_action: completed $REACTOR $ACTION"
+}
