@@ -237,7 +237,77 @@ interactive_collect_questions() {
 #            optional_depends and mquery items (page 1). Returns
 #            selected tags on stdout. Returns non-zero if cancelled.
 interactive_build_page1() {
+  local _bp1_line _bp1_type _bp1_mod _bp1_key _bp1_desc _bp1_state
+  local _bp1_newness _bp1_on_opts _bp1_off_opts
+  local _bp1_last_mod _bp1_items _bp1_count _bp1_result
+  local _bp1_height _bp1_width _bp1_list_height _bp1_title _bp1_has_page2
   debug_msg "interactive_build_page1 ($@)"
+
+  if [[ ! -s "$INTERACTIVE_PAGE1_FILE" ]]; then
+    return 0
+  fi
+
+  _bp1_last_mod=""
+  _bp1_items=()
+  _bp1_count=0
+
+  # check if page 2 has items
+  _bp1_has_page2=0
+  [[ -s "$INTERACTIVE_PAGE2_FILE" ]] && _bp1_has_page2=1
+
+  while IFS='|' read -r _bp1_type _bp1_mod _bp1_key _bp1_desc _bp1_state _bp1_newness _bp1_on_opts _bp1_off_opts; do
+    # add module separator when module changes
+    if [[ "$_bp1_mod" != "$_bp1_last_mod" ]]; then
+      _bp1_items+=("SEP:$_bp1_mod" "── $_bp1_mod ──" "off")
+      (( _bp1_count++ ))
+      _bp1_last_mod="$_bp1_mod"
+    fi
+
+    if [[ "$_bp1_type" == "dep" ]]; then
+      _bp1_items+=("dep:$_bp1_mod:$_bp1_key" "${_bp1_desc:-(optional dependency on $_bp1_key)}" "$_bp1_state")
+    elif [[ "$_bp1_type" == "mquery" ]]; then
+      _bp1_items+=("mquery:$_bp1_mod:$_bp1_key" "${_bp1_desc:-(configure option)}" "$_bp1_state")
+    fi
+    (( _bp1_count++ ))
+  done < "$INTERACTIVE_PAGE1_FILE"
+
+  if [[ $_bp1_count -eq 0 ]]; then
+    return 0
+  fi
+
+  # calculate dialog dimensions
+  _bp1_height=$(tput lines 2>/dev/null || echo 24)
+  _bp1_width=$(tput cols 2>/dev/null || echo 80)
+  (( _bp1_height = _bp1_height - 4 ))
+  (( _bp1_width = _bp1_width - 4 ))
+  [[ $_bp1_height -gt 40 ]] && _bp1_height=40
+  [[ $_bp1_width -gt 100 ]] && _bp1_width=100
+  [[ $_bp1_height -lt 15 ]] && _bp1_height=15
+  [[ $_bp1_width -lt 60 ]] && _bp1_width=60
+  _bp1_list_height=$(( _bp1_height - 7 ))
+
+  if [[ $_bp1_has_page2 -eq 1 ]]; then
+    _bp1_title="Configuration and Optional Dependencies (Page 1 of 2)"
+  else
+    _bp1_title="Configuration and Optional Dependencies"
+  fi
+
+  # run dialog, capture selected tags from stderr
+  exec 3>&1
+  _bp1_result=$(dialog --backtitle "Lunar Interactive Configuration" \
+    --title "$_bp1_title" \
+    --checklist "Use SPACE to toggle, ENTER to confirm, ESC to cancel" \
+    $_bp1_height $_bp1_width $_bp1_list_height \
+    "${_bp1_items[@]}" 2>&1 1>&3)
+  local _bp1_rc=$?
+  exec 3>&-
+
+  if [[ $_bp1_rc -ne 0 ]]; then
+    return 1
+  fi
+
+  echo "$_bp1_result"
+  return 0
 }
 
 
@@ -248,7 +318,63 @@ interactive_build_page1() {
 #            tags on stdout. Returns non-zero if cancelled. Skips
 #            silently if no one_of items were collected.
 interactive_build_page2() {
+  local _bp2_line _bp2_mod _bp2_group _bp2_desc _bp2_dep _bp2_state
+  local _bp2_newness _bp2_on_opts _bp2_off_opts
+  local _bp2_last_group _bp2_items _bp2_count _bp2_result
+  local _bp2_height _bp2_width _bp2_list_height
   debug_msg "interactive_build_page2 ($@)"
+
+  if [[ ! -s "$INTERACTIVE_PAGE2_FILE" ]]; then
+    return 0
+  fi
+
+  _bp2_last_group=""
+  _bp2_items=()
+  _bp2_count=0
+
+  while IFS='|' read -r _bp2_mod _bp2_group _bp2_desc _bp2_dep _bp2_state _bp2_newness _bp2_on_opts _bp2_off_opts; do
+    # add group separator when group changes
+    if [[ "$_bp2_group" != "$_bp2_last_group" ]]; then
+      _bp2_items+=("SEP:$_bp2_group" "── $_bp2_mod: $_bp2_desc (pick one) ──" "off")
+      (( _bp2_count++ ))
+      _bp2_last_group="$_bp2_group"
+    fi
+
+    _bp2_items+=("oneof:$_bp2_mod:$_bp2_group:$_bp2_dep" "$_bp2_dep" "$_bp2_state")
+    (( _bp2_count++ ))
+  done < "$INTERACTIVE_PAGE2_FILE"
+
+  if [[ $_bp2_count -eq 0 ]]; then
+    return 0
+  fi
+
+  # calculate dialog dimensions
+  _bp2_height=$(tput lines 2>/dev/null || echo 24)
+  _bp2_width=$(tput cols 2>/dev/null || echo 80)
+  (( _bp2_height = _bp2_height - 4 ))
+  (( _bp2_width = _bp2_width - 4 ))
+  [[ $_bp2_height -gt 40 ]] && _bp2_height=40
+  [[ $_bp2_width -gt 100 ]] && _bp2_width=100
+  [[ $_bp2_height -lt 15 ]] && _bp2_height=15
+  [[ $_bp2_width -lt 60 ]] && _bp2_width=60
+  _bp2_list_height=$(( _bp2_height - 7 ))
+
+  # run dialog
+  exec 3>&1
+  _bp2_result=$(dialog --backtitle "Lunar Interactive Configuration" \
+    --title "One-of Dependencies (Page 2 of 2)" \
+    --checklist "Select at most one per group. Use SPACE to toggle, ENTER to confirm" \
+    $_bp2_height $_bp2_width $_bp2_list_height \
+    "${_bp2_items[@]}" 2>&1 1>&3)
+  local _bp2_rc=$?
+  exec 3>&-
+
+  if [[ $_bp2_rc -ne 0 ]]; then
+    return 1
+  fi
+
+  echo "$_bp2_result"
+  return 0
 }
 
 
