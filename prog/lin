@@ -47,6 +47,7 @@ Optional Parameters:
                                 and download the sources
 -f  |  --from  directory	Specify an alternate for $SOURCE_CACHE
 -h  |  --help                   Displays this help text
+-i  |  --interactive            Batch configure all deps/options via dialog
        --opts '--enable-xxx'    Add custom configure options to the module
 -p  |  --probe                  Only lin if not already installed
 -r  |  --reconfigure		Select new dependencies for modules
@@ -108,6 +109,24 @@ main() {
     fi
     temp_create TEMP_CONFIGOPTS "configopts"
     export TEMP_CONFIGOPTS
+
+    # interactive mode: batch configure before dependency checking
+    if [[ -n "$INTERACTIVE" ]]; then
+      if ! interactive_configure $MODULES; then
+        message "${MESSAGE_COLOR}Interactive configuration cancelled.${DEFAULT_COLOR}"
+        if [ -n "$CLEAN_TEMP" ]; then
+          temp_destroy $TEMP_DOWNLOAD_PIDS
+          temp_destroy $TEMP_PREPAREDDEPS
+        fi
+        temp_destroy $TEMP_CONFIGOPTS
+        exit 1
+      fi
+      export SILENT="--silent"
+    elif [[ -z "$DEPS_ONLY" ]]; then
+      if interactive_maybe_prompt $MODULES; then
+        export SILENT="--silent"
+      fi
+    fi
 
     # pass 1 : run full dependency checking
     # This pass does configuration and dependency identification.
@@ -277,7 +296,7 @@ main() {
 . /etc/lunar/config
 . $BOOTSTRAP
 
-GETOPT_ARGS=$(getopt -q -n lin -o "cdgf:hprRsvV:w:46" -l "compile,debug,deps,download,from:,help,opts:,probe,reconfigure,resurrect,silent,verbose,Version:,want:,ipv4,ipv6" -- "$@")
+GETOPT_ARGS=$(getopt -q -n lin -o "cdgf:hiprRsvV:w:46" -l "compile,debug,deps,download,from:,help,interactive,opts:,probe,reconfigure,resurrect,silent,verbose,Version:,want:,ipv4,ipv6" -- "$@")
 
 lunar_setup_signals
 
@@ -323,6 +342,10 @@ else
       -h | --help)
         help
         exit
+        ;;
+      -i | --interactive)
+        export INTERACTIVE="--interactive"
+        shift
         ;;
       --opts)
         export PASS_OPTS="$2"
