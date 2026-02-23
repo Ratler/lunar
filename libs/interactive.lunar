@@ -24,8 +24,210 @@
 #            optionals ON, collecting optional_depends, mquery, and
 #            optional_depends_one_of items into temp files for later
 #            display in a dialog checklist.
+#
+# Page 1 file format (pipe-delimited):
+#   dep|MODULE|DEP|DESCRIPTION|STATE|new/existing|ON_OPTS|OFF_OPTS
+#   mquery|MODULE|KEY|QUESTION|STATE|new/existing
+#
+# Page 2 file format (pipe-delimited):
+#   MODULE|GROUP_ID|DESCRIPTION|DEP|STATE|new/existing|ON_OPTS|OFF_OPTS
 interactive_collect_questions() {
+  local _ic_mod _ic_oneof_counter
   debug_msg "interactive_collect_questions ($@)"
+
+  # ensure caches are loaded
+  [[ -z "${_DEPENDS_CACHE_LOADED+set}" ]] && load_depends_cache
+  [[ -z "${_DEPENDS_STATUS_LOADED+set}" ]] && load_depends_status
+  [[ -z "${_MODULE_STATUS_LOADED+set}" ]] && load_module_status
+  [[ -z "${_MODULE_INDEX_LOADED+set}" ]] && load_module_index
+
+  # create temp files
+  temp_create INTERACTIVE_PAGE1_FILE "interactive.page1"
+  temp_create INTERACTIVE_PAGE2_FILE "interactive.page2"
+  temp_create INTERACTIVE_VISITED "interactive.visited"
+
+  _ic_oneof_counter=0
+
+  # --- collector redefinitions (local to this function) ---
+
+  depends() {
+    local DEP
+    debug_msg "  interactive:depends ($@)"
+    expand_alias DEP "$1"
+    echo "$DEP"
+  }
+
+  optional_depends() {
+    local DEP STATE STORED NEWNESS ON_OPTS OFF_OPTS DESC
+    debug_msg "  interactive:optional_depends ($@)"
+    expand_alias DEP "$1"
+    ON_OPTS="$2"
+    OFF_OPTS="$3"
+    DESC="$4"
+
+    # always echo for recursion (optimistic pre-scan: all optionals ON)
+    echo "$DEP"
+
+    # skip exiled
+    if module_exiled "$DEP"; then
+      return
+    fi
+
+    # skip enforced
+    if module_enforced "$DEP"; then
+      return
+    fi
+
+    # skip auto-add case: installed AND no configure flags
+    if module_installed "$DEP" && [[ -z "$2" ]] && [[ -z "$3" ]]; then
+      return
+    fi
+
+    # determine state from depends status
+    STORED="${DEPENDS_STATUS_PAIR[$MODULE:$DEP]}"
+    NEWNESS="new"
+    if [[ "$STORED" == on:* ]]; then
+      STATE="on"
+      NEWNESS="existing"
+    elif [[ "$STORED" == off:* ]]; then
+      STATE="off"
+      NEWNESS="existing"
+    else
+      # no existing entry — use default
+      if module_installed "$DEP"; then
+        STATE="${5:-y}"
+      else
+        STATE="${5:-n}"
+      fi
+      # normalize y/n to on/off
+      [[ "$STATE" == "y" || "$STATE" == "Y" ]] && STATE="on" || STATE="off"
+    fi
+
+    echo "dep|$MODULE|$DEP|$DESC|$STATE|$NEWNESS|$ON_OPTS|$OFF_OPTS" >> "$INTERACTIVE_PAGE1_FILE"
+  }
+
+  optional_depends_requires() {
+    local FOLLOWER
+    debug_msg "  interactive:optional_depends_requires ($@)"
+    shift  # skip leader
+    for FOLLOWER in "$@"; do
+      expand_alias FOLLOWER "$FOLLOWER"
+      echo "$FOLLOWER"
+    done
+  }
+
+  optional_depends_one_of() {
+    local DESCRIPTION DEP ON_OPTS OFF_OPTS STATE STORED NEWNESS GROUP_ID
+    debug_msg "  interactive:optional_depends_one_of ($@)"
+    DESCRIPTION="$1"
+    shift
+
+    (( _ic_oneof_counter++ ))
+    GROUP_ID="${MODULE}:${_ic_oneof_counter}"
+
+    while [[ $# -ge 3 ]]; do
+      expand_alias DEP "$1"
+      ON_OPTS="$2"
+      OFF_OPTS="$3"
+      shift 3
+
+      # always echo for recursion
+      echo "$DEP"
+
+      STORED="${DEPENDS_STATUS_PAIR[$MODULE:$DEP]}"
+      NEWNESS="new"
+      if [[ "$STORED" == on:* ]]; then
+        STATE="on"
+        NEWNESS="existing"
+      elif [[ "$STORED" == off:* ]]; then
+        STATE="off"
+        NEWNESS="existing"
+      else
+        if module_installed "$DEP"; then
+          STATE="on"
+        else
+          STATE="off"
+        fi
+      fi
+
+      echo "$MODULE|$GROUP_ID|$DESCRIPTION|$DEP|$STATE|$NEWNESS|$ON_OPTS|$OFF_OPTS" >> "$INTERACTIVE_PAGE2_FILE"
+    done
+  }
+
+  mquery() {
+    local KEY QUESTION DEFAULT STATE CURRENT NEWNESS
+    debug_msg "  interactive:mquery ($@)"
+    KEY="$1"
+    QUESTION="$2"
+    DEFAULT="$3"
+
+    CURRENT=$(get_module_config "$KEY")
+    NEWNESS="new"
+    if [[ -n "$CURRENT" ]]; then
+      STATE="$CURRENT"
+      NEWNESS="existing"
+    else
+      STATE="${DEFAULT:-n}"
+    fi
+    # normalize y/n to on/off
+    [[ "$STATE" == "y" || "$STATE" == "Y" ]] && STATE="on" || STATE="off"
+
+    echo "mquery|$MODULE|$KEY|$QUESTION|$STATE|$NEWNESS" >> "$INTERACTIVE_PAGE1_FILE"
+  }
+
+  message() {
+    :
+  }
+
+  # --- inner recursive walker ---
+
+  _interactive_walk_module() {
+    local _iw_mod _iw_section _iw_deps _iw_dep SECTION SCRIPT_DIRECTORY MODULE_CONFIG
+    _iw_mod="$1"
+    debug_msg "  _interactive_walk_module ($@)"
+
+    # cycle guard
+    if grep -qx "$_iw_mod" "$INTERACTIVE_VISITED" 2>/dev/null; then
+      return
+    fi
+    echo "$_iw_mod" >> "$INTERACTIVE_VISITED"
+
+    _iw_section=$(find_section "$_iw_mod")
+    if [[ -z "$_iw_section" ]]; then
+      return
+    fi
+
+    SECTION="$_iw_section"
+    SCRIPT_DIRECTORY="$MOONBASE/$SECTION/$_iw_mod"
+    MODULE="$_iw_mod"
+    MODULE_CONFIG="$DEPENDS_CONFIG/$MODULE"
+
+    # source CONFIGURE (calls redefined mquery)
+    if [[ -e "$SCRIPT_DIRECTORY/CONFIGURE" ]] || [[ -e "$SCRIPT_DIRECTORY/CONFIGURE.$PLATFORM" ]]; then
+      prepare_module_config
+      run_module_file "$_iw_mod" CONFIGURE
+    fi
+
+    # source DEPENDS (calls redefined depends, optional_depends, etc.)
+    # capture echoed dep names for recursion
+    _iw_deps=""
+    if has_module_file "$_iw_mod" DEPENDS; then
+      _iw_deps=$(run_module_file "$_iw_mod" DEPENDS)
+    fi
+
+    for _iw_dep in $_iw_deps; do
+      expand_alias _iw_dep "$_iw_dep"
+      [[ -z "$_iw_dep" ]] && continue
+      [[ "$_iw_dep" == "%"* ]] && continue
+      _interactive_walk_module "$_iw_dep"
+    done
+  }
+
+  # --- walk all requested modules ---
+  for _ic_mod in "$@"; do
+    expand_alias _ic_mod "$_ic_mod"
+    _interactive_walk_module "$_ic_mod"
+  done
 }
 
 
