@@ -39,6 +39,7 @@ General options:
 
 -d  |  --debug                  Enables debug messages
 -h  |  --help                   Displays this help text
+-i  |  --interactive            Batch configure all deps/options via dialog
 -v  |  --verbose                Increases the level of message output
 
 Commands:
@@ -819,7 +820,7 @@ main() {
 . /etc/lunar/config
 . $BOOTSTRAP
 
-GETOPT_ARGS=$(getopt -q -n lunar -o "dhv" -l "debug,help,verbose" -- "$@")
+GETOPT_ARGS=$(getopt -q -n lunar -o "dhiv" -l "debug,help,interactive,verbose" -- "$@")
 
 if [ -z "$?" ]; then
   help | view_file
@@ -841,6 +842,10 @@ else
       -h | --help)
         help
         exit 1
+        ;;
+      -i | --interactive)
+        export INTERACTIVE="--interactive"
+        shift
         ;;
       -v | --verbose)
         export VERBOSE="on"

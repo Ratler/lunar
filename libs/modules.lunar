@@ -865,6 +865,16 @@ update_modules() {
   verbose_msg "Sorting update queue"
   QUEUE=$(sort_by_dependency $LIST)
 
+  # interactive mode: batch configure all expired modules before building
+  if [[ -n "$INTERACTIVE" ]]; then
+    if ! interactive_configure $QUEUE; then
+      message "${MESSAGE_COLOR}Interactive configuration cancelled.${DEFAULT_COLOR}"
+      return 1
+    fi
+  elif interactive_maybe_prompt $QUEUE; then
+    :  # interactive mode was used, proceed
+  fi
+
   message "${MESSAGE_COLOR}The following modules will be updated:${DEFAULT_COLOR}"
   temp_create TMP_QUEUE "update-queue"
   for MODULE in $QUEUE ; do
