@@ -457,7 +457,65 @@ interactive_write_results() {
 # purpose  : main entry point — collect questions, show dialogs,
 #            write results. Returns 0 on success, 1 if cancelled.
 interactive_configure() {
+  local _ic_page1_result _ic_page2_result _ic_mod
   debug_msg "interactive_configure ($@)"
+
+  # handle -ir: wipe config before collecting if RECONFIGURE is set
+  if [[ -n "$RECONFIGURE" ]]; then
+    for _ic_mod in "$@"; do
+      expand_alias _ic_mod "$_ic_mod"
+      rm -f "$DEPENDS_CONFIG/$_ic_mod"
+      remove_depends "$_ic_mod"
+    done
+    reload_depends_status
+  fi
+
+  # store root modules for parent-child tracking in result writer
+  INTERACTIVE_ROOT_MODULES="$*"
+
+  interactive_collect_questions "$@"
+
+  # if nothing to configure, succeed silently
+  if [[ ! -s "$INTERACTIVE_PAGE1_FILE" ]] && [[ ! -s "$INTERACTIVE_PAGE2_FILE" ]]; then
+    _interactive_cleanup
+    return 0
+  fi
+
+  # page 1
+  _ic_page1_result=""
+  if [[ -s "$INTERACTIVE_PAGE1_FILE" ]]; then
+    _ic_page1_result=$(interactive_build_page1)
+    if [[ $? -ne 0 ]]; then
+      _interactive_cleanup
+      return 1
+    fi
+  fi
+
+  # page 2
+  _ic_page2_result=""
+  if [[ -s "$INTERACTIVE_PAGE2_FILE" ]]; then
+    _ic_page2_result=$(interactive_build_page2)
+    if [[ $? -ne 0 ]]; then
+      _interactive_cleanup
+      return 1
+    fi
+  fi
+
+  interactive_write_results "$_ic_page1_result" "$_ic_page2_result"
+
+  _interactive_cleanup
+  return 0
+}
+
+
+# function : _interactive_cleanup
+# usage    : _interactive_cleanup
+# purpose  : clean up temp files created by the collector
+_interactive_cleanup() {
+  debug_msg "_interactive_cleanup ($@)"
+  [[ -n "$INTERACTIVE_PAGE1_FILE" ]] && temp_destroy "$INTERACTIVE_PAGE1_FILE"
+  [[ -n "$INTERACTIVE_PAGE2_FILE" ]] && temp_destroy "$INTERACTIVE_PAGE2_FILE"
+  [[ -n "$INTERACTIVE_VISITED" ]] && temp_destroy "$INTERACTIVE_VISITED"
 }
 
 
@@ -467,7 +525,20 @@ interactive_configure() {
 #            existing stored answer (new items needing configuration).
 #            Must be called after interactive_collect_questions.
 interactive_count_unanswered() {
+  local _cu_count=0
   debug_msg "interactive_count_unanswered ($@)"
+
+  if [[ -s "$INTERACTIVE_PAGE1_FILE" ]]; then
+    _cu_count=$(grep -c '|new|' "$INTERACTIVE_PAGE1_FILE" 2>/dev/null || echo 0)
+  fi
+
+  if [[ -s "$INTERACTIVE_PAGE2_FILE" ]]; then
+    local _cu_p2
+    _cu_p2=$(grep -c '|new|' "$INTERACTIVE_PAGE2_FILE" 2>/dev/null || echo 0)
+    (( _cu_count += _cu_p2 ))
+  fi
+
+  echo "$_cu_count"
 }
 
 
@@ -478,5 +549,28 @@ interactive_count_unanswered() {
 #            offers the user a chance to switch to interactive mode.
 #            Returns 0 if interactive mode was used, 1 otherwise.
 interactive_maybe_prompt() {
+  local _mp_count _mp_threshold
   debug_msg "interactive_maybe_prompt ($@)"
+
+  _mp_threshold="${INTERACTIVE_THRESHOLD:-20}"
+
+  # threshold of 0 means disabled
+  if [[ "$_mp_threshold" -eq 0 ]]; then
+    return 1
+  fi
+
+  interactive_collect_questions "$@"
+  _mp_count=$(interactive_count_unanswered)
+
+  if [[ "$_mp_count" -gt "$_mp_threshold" ]]; then
+    _interactive_cleanup
+    if query "This operation has $_mp_count unanswered configuration questions. Launch interactive mode to answer them all at once?" n; then
+      interactive_configure "$@"
+      return $?
+    fi
+    return 1
+  fi
+
+  _interactive_cleanup
+  return 1
 }
