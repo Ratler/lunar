@@ -75,6 +75,7 @@ export        DIALOGRC=/etc/lunar/dialogrc
               GARBAGE=${GARBAGE:-on}
          PROMPT_DELAY=${PROMPT_DELAY:-150}
         PROBE_EXPIRED=${PROBE_EXPIRED:-on}
+  INTERACTIVE_THRESHOLD=${INTERACTIVE_THRESHOLD:-20}
        LUNAR_PRIORITY="+10"
           TMPFS_BUILD=${TMPFS_BUILD:-off}
 

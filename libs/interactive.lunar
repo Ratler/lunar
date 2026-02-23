@@ -1,0 +1,90 @@
+#!/bin/bash
+#                                                          #
+# interactive.lunar - batch interactive configuration      #
+#                                                          #
+############################################################
+#                                                          #
+# This code is written for Lunar Linux, see                #
+# http://lunar-linux.org                                   #
+#                                                          #
+############################################################
+#                                                          #
+# Provides a batch dialog UI for configuring all optional  #
+# dependencies and mquery options across an entire module  #
+# dependency tree at once, rather than one-by-one prompts. #
+#                                                          #
+# Copyright Stefan Wold 2026 under GPLv2                   #
+#                                                          #
+############################################################
+
+
+# function : interactive_collect_questions
+# usage    : interactive_collect_questions module [module...]
+# purpose  : walk the dependency tree of the given modules with all
+#            optionals ON, collecting optional_depends, mquery, and
+#            optional_depends_one_of items into temp files for later
+#            display in a dialog checklist.
+interactive_collect_questions() {
+  debug_msg "interactive_collect_questions ($@)"
+}
+
+
+# function : interactive_build_page1
+# usage    : interactive_build_page1
+# purpose  : build and display a dialog --checklist for all collected
+#            optional_depends and mquery items (page 1). Returns
+#            selected tags on stdout. Returns non-zero if cancelled.
+interactive_build_page1() {
+  debug_msg "interactive_build_page1 ($@)"
+}
+
+
+# function : interactive_build_page2
+# usage    : interactive_build_page2
+# purpose  : build and display a dialog --checklist for all collected
+#            optional_depends_one_of groups (page 2). Returns selected
+#            tags on stdout. Returns non-zero if cancelled. Skips
+#            silently if no one_of items were collected.
+interactive_build_page2() {
+  debug_msg "interactive_build_page2 ($@)"
+}
+
+
+# function : interactive_write_results
+# usage    : interactive_write_results "page1_tags" "page2_tags"
+# purpose  : parse dialog output and write results to the depends
+#            database and module config files. Handles parent-child
+#            disabling and one_of mutual exclusivity.
+interactive_write_results() {
+  debug_msg "interactive_write_results ($@)"
+}
+
+
+# function : interactive_configure
+# usage    : interactive_configure module [module...]
+# purpose  : main entry point — collect questions, show dialogs,
+#            write results. Returns 0 on success, 1 if cancelled.
+interactive_configure() {
+  debug_msg "interactive_configure ($@)"
+}
+
+
+# function : interactive_count_unanswered
+# usage    : interactive_count_unanswered
+# purpose  : count items in the collected temp files that have no
+#            existing stored answer (new items needing configuration).
+#            Must be called after interactive_collect_questions.
+interactive_count_unanswered() {
+  debug_msg "interactive_count_unanswered ($@)"
+}
+
+
+# function : interactive_maybe_prompt
+# usage    : interactive_maybe_prompt module [module...]
+# purpose  : auto-detect threshold check. Collects questions, counts
+#            unanswered items, and if count exceeds INTERACTIVE_THRESHOLD,
+#            offers the user a chance to switch to interactive mode.
+#            Returns 0 if interactive mode was used, 1 otherwise.
+interactive_maybe_prompt() {
+  debug_msg "interactive_maybe_prompt ($@)"
+}
