@@ -407,8 +407,14 @@ interactive_write_results() {
   done
 
   # --- process page 1 results (top-down walk) ---
+  # skip items whose parent module is not enabled (sub-deps of disabled parents)
   if [[ -s "$INTERACTIVE_PAGE1_FILE" ]]; then
     while IFS=$'\x1f' read -r _wr_type _wr_mod _wr_key _wr_desc _wr_state _wr_newness _wr_on_opts _wr_off_opts; do
+      # skip if parent module is not in the enabled set
+      if [[ -z "${_wr_enabled[$_wr_mod]}" ]]; then
+        continue
+      fi
+
       if [[ "$_wr_type" == "dep" ]]; then
         _wr_tag="dep:$_wr_mod:$_wr_key"
         if [[ "$_wr_page1_tags" == *" $_wr_tag "* ]]; then
@@ -435,6 +441,11 @@ interactive_write_results() {
   if [[ -s "$INTERACTIVE_PAGE2_FILE" ]]; then
     local -A _wr_group_chosen
     while IFS=$'\x1f' read -r _wr_mod _wr_group _wr_desc _wr_dep _wr_state _wr_newness _wr_on_opts _wr_off_opts; do
+      # skip if parent module is not in the enabled set
+      if [[ -z "${_wr_enabled[$_wr_mod]}" ]]; then
+        continue
+      fi
+
       _wr_tag="oneof:$_wr_mod:$_wr_group:$_wr_dep"
       if [[ "$_wr_page2_tags" == *" $_wr_tag "* ]]; then
         # selected — but enforce mutual exclusivity
