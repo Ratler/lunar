@@ -25,12 +25,12 @@
 #            optional_depends_one_of items into temp files for later
 #            display in a dialog checklist.
 #
-# Page 1 file format (pipe-delimited):
-#   dep|MODULE|DEP|DESCRIPTION|STATE|new/existing|ON_OPTS|OFF_OPTS
-#   mquery|MODULE|KEY|QUESTION|STATE|new/existing
+# Page 1 file format (unit-separator \x1f delimited):
+#   dep\x1fMODULE\x1fDEP\x1fDESCRIPTION\x1fSTATE\x1fnew/existing\x1fON_OPTS\x1fOFF_OPTS
+#   mquery\x1fMODULE\x1fKEY\x1fQUESTION\x1fSTATE\x1fnew/existing
 #
-# Page 2 file format (pipe-delimited):
-#   MODULE|GROUP_ID|DESCRIPTION|DEP|STATE|new/existing|ON_OPTS|OFF_OPTS
+# Page 2 file format (unit-separator \x1f delimited):
+#   MODULE\x1fGROUP_ID\x1fDESCRIPTION\x1fDEP\x1fSTATE\x1fnew/existing\x1fON_OPTS\x1fOFF_OPTS
 interactive_collect_questions() {
   local _ic_mod _ic_oneof_counter
   debug_msg "interactive_collect_questions ($@)"
@@ -103,7 +103,8 @@ interactive_collect_questions() {
       [[ "$STATE" == "y" || "$STATE" == "Y" ]] && STATE="on" || STATE="off"
     fi
 
-    echo "dep|$MODULE|$DEP|$DESC|$STATE|$NEWNESS|$ON_OPTS|$OFF_OPTS" >> "$INTERACTIVE_PAGE1_FILE"
+    printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' \
+      "dep" "$MODULE" "$DEP" "$DESC" "$STATE" "$NEWNESS" "$ON_OPTS" "$OFF_OPTS" >> "$INTERACTIVE_PAGE1_FILE"
   }
 
   optional_depends_requires() {
@@ -150,7 +151,8 @@ interactive_collect_questions() {
         fi
       fi
 
-      echo "$MODULE|$GROUP_ID|$DESCRIPTION|$DEP|$STATE|$NEWNESS|$ON_OPTS|$OFF_OPTS" >> "$INTERACTIVE_PAGE2_FILE"
+      printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' \
+        "$MODULE" "$GROUP_ID" "$DESCRIPTION" "$DEP" "$STATE" "$NEWNESS" "$ON_OPTS" "$OFF_OPTS" >> "$INTERACTIVE_PAGE2_FILE"
     done
   }
 
@@ -172,7 +174,8 @@ interactive_collect_questions() {
     # normalize y/n to on/off
     [[ "$STATE" == "y" || "$STATE" == "Y" ]] && STATE="on" || STATE="off"
 
-    echo "mquery|$MODULE|$KEY|$QUESTION|$STATE|$NEWNESS" >> "$INTERACTIVE_PAGE1_FILE"
+    printf '%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\n' \
+      "mquery" "$MODULE" "$KEY" "$QUESTION" "$STATE" "$NEWNESS" >> "$INTERACTIVE_PAGE1_FILE"
   }
 
   message() {
@@ -255,7 +258,7 @@ interactive_build_page1() {
   _bp1_has_page2=0
   [[ -s "$INTERACTIVE_PAGE2_FILE" ]] && _bp1_has_page2=1
 
-  while IFS='|' read -r _bp1_type _bp1_mod _bp1_key _bp1_desc _bp1_state _bp1_newness _bp1_on_opts _bp1_off_opts; do
+  while IFS=$'\x1f' read -r _bp1_type _bp1_mod _bp1_key _bp1_desc _bp1_state _bp1_newness _bp1_on_opts _bp1_off_opts; do
     # add module separator when module changes
     if [[ "$_bp1_mod" != "$_bp1_last_mod" ]]; then
       _bp1_items+=("SEP:$_bp1_mod" "── $_bp1_mod ──" "off")
@@ -332,7 +335,7 @@ interactive_build_page2() {
   _bp2_items=()
   _bp2_count=0
 
-  while IFS='|' read -r _bp2_mod _bp2_group _bp2_desc _bp2_dep _bp2_state _bp2_newness _bp2_on_opts _bp2_off_opts; do
+  while IFS=$'\x1f' read -r _bp2_mod _bp2_group _bp2_desc _bp2_dep _bp2_state _bp2_newness _bp2_on_opts _bp2_off_opts; do
     # add group separator when group changes
     if [[ "$_bp2_group" != "$_bp2_last_group" ]]; then
       _bp2_items+=("SEP:$_bp2_group" "── $_bp2_mod: $_bp2_desc (pick one) ──" "off")
@@ -405,7 +408,7 @@ interactive_write_results() {
 
   # --- process page 1 results (top-down walk) ---
   if [[ -s "$INTERACTIVE_PAGE1_FILE" ]]; then
-    while IFS='|' read -r _wr_type _wr_mod _wr_key _wr_desc _wr_state _wr_newness _wr_on_opts _wr_off_opts; do
+    while IFS=$'\x1f' read -r _wr_type _wr_mod _wr_key _wr_desc _wr_state _wr_newness _wr_on_opts _wr_off_opts; do
       if [[ "$_wr_type" == "dep" ]]; then
         _wr_tag="dep:$_wr_mod:$_wr_key"
         if [[ "$_wr_page1_tags" == *" $_wr_tag "* ]]; then
@@ -431,7 +434,7 @@ interactive_write_results() {
   # --- process page 2 results (one_of groups) ---
   if [[ -s "$INTERACTIVE_PAGE2_FILE" ]]; then
     local -A _wr_group_chosen
-    while IFS='|' read -r _wr_mod _wr_group _wr_desc _wr_dep _wr_state _wr_newness _wr_on_opts _wr_off_opts; do
+    while IFS=$'\x1f' read -r _wr_mod _wr_group _wr_desc _wr_dep _wr_state _wr_newness _wr_on_opts _wr_off_opts; do
       _wr_tag="oneof:$_wr_mod:$_wr_group:$_wr_dep"
       if [[ "$_wr_page2_tags" == *" $_wr_tag "* ]]; then
         # selected — but enforce mutual exclusivity
@@ -529,12 +532,12 @@ interactive_count_unanswered() {
   debug_msg "interactive_count_unanswered ($@)"
 
   if [[ -s "$INTERACTIVE_PAGE1_FILE" ]]; then
-    _cu_count=$(grep -c '|new|' "$INTERACTIVE_PAGE1_FILE" 2>/dev/null || echo 0)
+    _cu_count=$(grep -cP '\x1fnew\x1f' "$INTERACTIVE_PAGE1_FILE" 2>/dev/null || echo 0)
   fi
 
   if [[ -s "$INTERACTIVE_PAGE2_FILE" ]]; then
     local _cu_p2
-    _cu_p2=$(grep -c '|new|' "$INTERACTIVE_PAGE2_FILE" 2>/dev/null || echo 0)
+    _cu_p2=$(grep -cP '\x1fnew\x1f' "$INTERACTIVE_PAGE2_FILE" 2>/dev/null || echo 0)
     (( _cu_count += _cu_p2 ))
   fi
 
@@ -553,6 +556,9 @@ interactive_maybe_prompt() {
   debug_msg "interactive_maybe_prompt ($@)"
 
   _mp_threshold="${INTERACTIVE_THRESHOLD:-20}"
+
+  # validate threshold is an integer, default to 20 if not
+  [[ "$_mp_threshold" =~ ^[0-9]+$ ]] || _mp_threshold=20
 
   # threshold of 0 means disabled
   if [[ "$_mp_threshold" -eq 0 ]]; then
