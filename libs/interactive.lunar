@@ -384,7 +384,71 @@ interactive_build_page2() {
 #            database and module config files. Handles parent-child
 #            disabling and one_of mutual exclusivity.
 interactive_write_results() {
+  local _wr_page1_tags _wr_page2_tags
+  local _wr_line _wr_type _wr_mod _wr_key _wr_desc _wr_state
+  local _wr_newness _wr_on_opts _wr_off_opts _wr_tag
+  local _wr_group _wr_dep
   debug_msg "interactive_write_results ($@)"
+
+  _wr_page1_tags=" $1 "
+  _wr_page2_tags=" $2 "
+
+  # build a set of enabled modules for parent-child tracking
+  # a module is "enabled" if it was selected as a dep OR is a root module
+  local -A _wr_enabled
+  local _wr_root
+  # root modules (the ones originally passed to interactive_configure)
+  # are stored in INTERACTIVE_ROOT_MODULES (set by the orchestrator)
+  for _wr_root in $INTERACTIVE_ROOT_MODULES; do
+    _wr_enabled[$_wr_root]=1
+  done
+
+  # --- process page 1 results (top-down walk) ---
+  if [[ -s "$INTERACTIVE_PAGE1_FILE" ]]; then
+    while IFS='|' read -r _wr_type _wr_mod _wr_key _wr_desc _wr_state _wr_newness _wr_on_opts _wr_off_opts; do
+      if [[ "$_wr_type" == "dep" ]]; then
+        _wr_tag="dep:$_wr_mod:$_wr_key"
+        if [[ "$_wr_page1_tags" == *" $_wr_tag "* ]]; then
+          # selected ON
+          add_depends "$_wr_mod" "$_wr_key" "on" "optional" "$_wr_on_opts" "$_wr_off_opts"
+          _wr_enabled[$_wr_key]=1
+        else
+          # selected OFF
+          add_depends "$_wr_mod" "$_wr_key" "off" "optional" "$_wr_on_opts" "$_wr_off_opts"
+        fi
+      elif [[ "$_wr_type" == "mquery" ]]; then
+        _wr_tag="mquery:$_wr_mod:$_wr_key"
+        MODULE="$_wr_mod"
+        if [[ "$_wr_page1_tags" == *" $_wr_tag "* ]]; then
+          set_module_config "$_wr_key" "y"
+        else
+          set_module_config "$_wr_key" "n"
+        fi
+      fi
+    done < "$INTERACTIVE_PAGE1_FILE"
+  fi
+
+  # --- process page 2 results (one_of groups) ---
+  if [[ -s "$INTERACTIVE_PAGE2_FILE" ]]; then
+    local -A _wr_group_chosen
+    while IFS='|' read -r _wr_mod _wr_group _wr_desc _wr_dep _wr_state _wr_newness _wr_on_opts _wr_off_opts; do
+      _wr_tag="oneof:$_wr_mod:$_wr_group:$_wr_dep"
+      if [[ "$_wr_page2_tags" == *" $_wr_tag "* ]]; then
+        # selected — but enforce mutual exclusivity
+        if [[ -z "${_wr_group_chosen[$_wr_group]}" ]]; then
+          # first selected in this group — keep ON
+          add_depends "$_wr_mod" "$_wr_dep" "on" "optional" "$_wr_on_opts" "$_wr_off_opts"
+          _wr_group_chosen[$_wr_group]="$_wr_dep"
+          _wr_enabled[$_wr_dep]=1
+        else
+          # additional selected — force OFF (mutual exclusivity)
+          add_depends "$_wr_mod" "$_wr_dep" "off" "optional" "$_wr_on_opts" "$_wr_off_opts"
+        fi
+      else
+        add_depends "$_wr_mod" "$_wr_dep" "off" "optional" "$_wr_on_opts" "$_wr_off_opts"
+      fi
+    done < "$INTERACTIVE_PAGE2_FILE"
+  fi
 }
 
 
